@@ -122,7 +122,7 @@ Storage:
 
 ### Tech choices
 - TypeScript, Vite (or esbuild) multi-entry build, Vitest for unit tests.
-- `@contentauth/c2pa-wasm` for Content Credentials, called via `WasmReader.fromBytes` directly in the service worker, always with remote fetches disabled (section 2). Needs `'wasm-unsafe-eval'` in the extension CSP and the `.wasm` bundled in the extension. Initialise lazily inside the event handler (module service workers do not allow top-level `await`; listeners must be registered synchronously). Call `free()` on readers. If the M0 spike shows it cannot run in the worker, fall back to an offscreen document (`chrome.offscreen`) and add the `offscreen` permission.
+- `@contentauth/c2pa-wasm` for Content Credentials, pinned to an exact version in `package.json` (no `^`/`~`; 0.x releases change the API and the settings format). Upgrade deliberately, with the fixture tests as the gate. Called via `WasmReader.fromBytes` directly in the service worker, always with remote fetches disabled (section 2). Needs `'wasm-unsafe-eval'` in the extension CSP and the `.wasm` bundled in the extension. Initialise lazily inside the event handler (module service workers do not allow top-level `await`; listeners must be registered synchronously). Call `free()` on readers. If the M0 spike shows it cannot run in the worker, fall back to an offscreen document (`chrome.offscreen`) and add the `offscreen` permission.
 - No C2PA trust list in v0.1 (bundling one goes stale; downloading one breaks the no-extra-requests rule). Locally read issuer and model are shown as **claimed (signer not verified)**.
 - XMP: a small own scanner that finds the XMP packet (`<x:xmpmeta` … `</x:xmpmeta>`) in the raw bytes, which works for JPEG, PNG (uncompressed iTXt), WebP, GIF and AVIF/HEIC alike. Compressed PNG text chunks are not supported (documented limitation). No XMP library.
 - No remote code, no analytics, no external fonts.
@@ -346,19 +346,23 @@ Not an AI signal (show details in the popup, no TÄ):
   3. `chrome.permissions.request` inside `contextMenus.onClicked`: allowed or not. Does `permissions.contains` report the `activeTab` grant?
   4. Injection into a cross-origin iframe's `frameId` with only `activeTab`: works or fails.
   5. Worker survival: a 40 MiB download and a 40 MiB upload over a throttled connection (DevTools network throttling) taking over 30 s: does the worker survive? Does `setAccessLevel` work on `storage.local`?
+  6. What `srcUrl` really is: right-click about 10 images on real sites (social feeds with thumbnails, lazy-loaded pages, `srcset`/`<picture>`, a login-only image). For each, record `srcUrl`, the element's `currentSrc` and natural size, whether it is a thumbnail of a larger original, and whether the worker can fetch it with `credentials: "omit"`.
 - Accept: extension loads; `npm run build` and `npm test` run; the spike results are recorded in section 2 and the plan is adjusted.
+
+**Thin end-to-end path first.** M1 and M2 together deliver one working path on a real page (right-click → fetch → C2PA → verdict → TÄ or "No AI signal found" in the placeholder popup) before the rest is built around it.
 
 **M1. Context menu and UI shell**
 - Menu on images; on-demand injection into the clicked frame; idempotent guard; Shadow DOM host; popup with placeholder text; fake "TÄ" badge on matching images; extension-window fallback for restricted frames.
 - Accept: right-click image shows TÄ badge and popup on a normal website, including in an iframe and in a tab opened before install.
 
-**M2. Fetch and sniff**
+**M2. Fetch, sniff and thin end-to-end path**
 - Host permission flow, `fetchImage` with timeout and streaming size limit, magic-byte sniff, SHA-256, `data:`/`blob:` handling.
-- Accept: type and size correctly reported for the fixtures and a cross-origin CDN image.
+- C2PA check, verdict, and the orchestration that runs them and sends the result (no XMP, no cache yet).
+- Accept: on a real page the halloween fixture shows TÄ with claimed issuer OpenAI and the phone photo shows "No AI signal found"; a cross-origin CDN image is fetched.
 
-**M3. Local checks and verdict**
-- C2PA mapping, XMP scanner, verdict, session cache, and the orchestration that runs them and sends the result.
-- Accept: halloween fixture shows TÄ from local checks with claimed issuer OpenAI; phone photo shows "No AI signal found".
+**M3. XMP and cache**
+- XMP scanner and session cache, added to the M2 pipeline.
+- Accept: an image with only XMP DigitalSourceType shows TÄ; checking the same image twice reuses the cached result.
 
 **M4. Options and OpenAI check**
 - Options page, OpenAI request/response/error handling, confirmation window, OpenAI flow (re-fetch, hash check, server conversion), `test:live`.
