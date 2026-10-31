@@ -325,6 +325,7 @@ Not an AI signal (show details in the popup, no TÄ):
 **Mocking:** mock `fetch` for the OpenAI endpoint. No real API calls in `npm test`. `npm run test:live` uses a separate Vitest config that includes only `test/live/*.live.ts`; it reads `OPENAI_API_KEY` from the environment, checks the two fixtures against `test/fixtures/openai-*.json`, exits non-zero with a message when the key is missing, and never prints the key.
 
 **Manual test checklist** (run by the owner in Brave with the extension loaded via `brave://extensions` > Developer mode > Load unpacked):
+0. M0: `dist/` loads with no errors on `brave://extensions`; the service worker starts and the options page renders its strings (i18n fill, `setAccessLevel` succeeds).
 1. Right-click an image on a normal site: menu item appears; non-image elements do not show it.
 2. Works in a tab that was already open before the extension was installed or reloaded.
 3. Works for an image inside a same-origin and a cross-origin iframe (badge appears in the right frame).
