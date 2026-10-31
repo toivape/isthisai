@@ -131,7 +131,7 @@ Triggered only by a context-menu click. Input: `info.srcUrl`, `tab.id`, `info.fr
 
 1. **Host permission.** If the image origin is not covered (`chrome.permissions.contains`), request `<all_urls>`. Whether `permissions.request` is allowed inside `contextMenus.onClicked` is checked in the M0 spike; if it is not, open a small extension page with an "Allow" button that makes the request. If the user declines: error `permission_denied`.
 2. **Inject the UI script** into the frame and show the "checking" state.
-3. **Fetch bytes.** `fetch(url, {credentials: "omit", signal: AbortSignal.timeout(...)})`. Stop reading once more than 50 MiB has arrived (do not download everything and then check). `blob:` bytes come from the content script instead (see section 3). Sniff the media type from magic bytes (do not trust the `Content-Type` header or file extension). Compute SHA-256 of the bytes. Some sites will refuse the download (hotlink protection, login-only images); report `fetch_failed` with the "the site blocked the download" hint.
+3. **Fetch bytes.** `fetch(url, {credentials: "omit", headers: {Accept: ...}, signal: AbortSignal.timeout(...)})`. Set `Accept` to the value Brave sends for `<img>` requests (copy it from DevTools in M2), so a CDN that negotiates formats returns the same bytes the page displays. Stop reading once more than 50 MiB has arrived (do not download everything and then check). `blob:` bytes come from the content script instead (see section 3). Sniff the media type from magic bytes (do not trust the `Content-Type` header or file extension). Compute SHA-256 of the bytes. Some sites will refuse the download (hotlink protection, login-only images); report `fetch_failed` with the "the site blocked the download" hint.
 4. **Cache lookup** by SHA-256. If a result exists (and the OpenAI step was already done, or not requested), return it.
 5. **Local checks** (free, offline, nothing leaves the machine). Run for every supported image type, including AVIF/HEIC/GIF if the parsers accept them; only the OpenAI step is limited to PNG/JPEG/WebP.
    - C2PA manifest: `WasmReader.fromBytes`. `JumbfNotFound` means `not_detected`; other parser errors mean `error`. Record issuer, validation state, generator/model, time, and whether any manifest in the store has an action whose `digitalSourceType` is AI (see TÄ rule).
@@ -144,6 +144,7 @@ Triggered only by a context-menu click. Input: `info.srcUrl`, `tab.id`, `info.fr
 - `chrome.storage.session` (cleared when the browser closes; image hashes are not kept as long-term history).
 - Store only results, never image bytes.
 - Never cache errors, so a retry after 429 or a network failure really retries.
+- No "check again" in v0.1: a cached result is shown as is.
 
 ### Verdict model (`CheckResult`)
 ```ts
@@ -214,7 +215,7 @@ Not an AI signal (show details in the popup, no TÄ):
 - Advise users in the options text to create a **dedicated project key with a spend limit** in the OpenAI dashboard.
 - **Confirmation before every OpenAI upload** (checkbox "Don't ask again" stored in settings): "This image will be sent to OpenAI to check for provenance signals. Checks may be billed to your OpenAI account."
 - The extension makes no network requests other than: fetching the image the user chose, and the OpenAI call the user confirmed.
-- Privacy section in the options page and store listing, stating exactly this.
+- Privacy section in the options page and README, stating exactly this.
 - Handle `data:`/`blob:` and cross-origin fetch failures gracefully (explain that the site blocked the download).
 - Never try to evade or reverse watermarks (OpenAI's usage guidance forbids repeated queries to do so). Cache by hash so the same image is not re-sent.
 
@@ -288,7 +289,7 @@ Not an AI signal (show details in the popup, no TÄ):
 - Accept: switching browser language to Finnish shows Finnish UI everywhere.
 
 **M7. Packaging**
-- Production build, README (install, usage, privacy, limits including the overlay limitation), store-listing text (clear privacy statement), version 0.1.0 zip.
+- Production build, README (install from zip via Load unpacked, usage, privacy, limits including the overlay limitation), version 0.1.0 zip. No store listing.
 - Accept: fresh-profile install works from the zip.
 
 ---
@@ -300,7 +301,8 @@ Not an AI signal (show details in the popup, no TÄ):
 3. Does the OpenAI SynthID check also detect Google/other partner watermarks via this API? The docs only promise "supported OpenAI signals", so assume no and say so in the UI.
 4. Final Finnish label from the EU Code of Practice icon annex.
 5. Whether to bundle a C2PA trust list in a later version, so local results can show `trusted`.
-6. Whether to add other providers' checks later (only if an official public API appears).
+6. Whether to publish to a store at all (v0.1 is a zip only).
+7. Whether to add other providers' checks later (only if an official public API appears).
 
 ---
 
