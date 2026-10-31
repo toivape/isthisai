@@ -27,7 +27,12 @@ export interface RepoFile {
 }
 
 // Text files only: binary assets (wasm, png) cannot trip the rules meaningfully.
-const TEXT_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".json", ".html", ".css", ".svg"]);
+// Covers every extension Vite can compile (resolve.extensions) plus assets:
+// a source file using a rarer extension (.mts, .cjs, .tsx) must not dodge the rules.
+const TEXT_EXTENSIONS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs",
+  ".json", ".html", ".css", ".svg",
+]);
 
 const SCAN_DIRS = ["src", "_locales"];
 const SCAN_FILES = ["manifest.json"];
@@ -77,14 +82,16 @@ const noReencode: Rule = (path, content) =>
   matches(path, content, "no-reencode", /\b(canvas|OffscreenCanvas|toDataURL|toBlob|createImageBitmap)\b/, "re-encoding API forbidden");
 
 // The OpenAI multipart request must let fetch + FormData set Content-Type.
-// Matches string literals like "Content-Type" and 'Content-Type', but not
-// comments or the words content-type without quotes.
+// Header names are case-insensitive in fetch, so match any casing, inside
+// any quote style including template literals. Prose in comments has no
+// quotes around the name and stays allowed.
 const noContentType: Rule = (path, content) =>
-  matches(path, content, "no-content-type", /(["'])Content-Type\1/, "hand-set Content-Type header forbidden");
+  matches(path, content, "no-content-type", /(["'`])content-type\1/i, "hand-set Content-Type header forbidden");
 
-// The JPEG media type is image/jpeg, never image/jpg.
+// The JPEG media type is image/jpeg, never image/jpg. Media types are
+// case-insensitive and any quote style counts.
 const noImageJpg: Rule = (path, content) =>
-  matches(path, content, "no-image-jpg", /(["'])image\/jpg\1/, "use image/jpeg, not image/jpg");
+  matches(path, content, "no-image-jpg", /(["'`])image\/jpg\1/i, "use image/jpeg, not image/jpg");
 
 // c2pa-wasm is allowed only in src/background/c2pa.ts, and that file must
 // disable remote fetches: a crafted image could otherwise make the wasm

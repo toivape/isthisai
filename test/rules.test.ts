@@ -1,4 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { join } from "node:path";
+import { rmSync, writeFileSync } from "node:fs";
 import { localeParity, RULES, ruleViolations, scanRepo, type RuleId, type Violation } from "./rules";
 
 const CASES: {
@@ -18,14 +20,23 @@ const CASES: {
   },
   {
     rule: "no-content-type",
-    bad: [{ path: "src/background/bad.ts", content: 'const headers = { "Content-Type": "image/jpeg" };\n' }],
-    clean: [{ path: "src/background/good.ts", content: 'const headers = { Accept: "image/jpeg" };\n' }],
+    bad: [
+      { path: "src/background/bad.ts", content: 'const headers = { "Content-Type": "image/jpeg" };\n' },
+      { path: "src/background/bad2.ts", content: 'const headers = { "content-type": "image/jpeg" };\n' },
+      { path: "src/background/bad3.ts", content: "const header = `Content-Type`;\n" },
+    ],
+    clean: [
+      { path: "src/background/good.ts", content: 'const headers = { Accept: "image/jpeg" };\n' },
+      { path: "src/background/good2.ts", content: "// fetch and FormData set Content-Type themselves\n" },
+    ],
   },
   {
     rule: "no-image-jpg",
     bad: [
       { path: "src/background/bad.ts", content: 'const mediaType = "image/jpg";\n' },
       { path: "src/background/bad2.ts", content: "const mediaType = 'image/jpg';\n" },
+      { path: "src/background/bad3.ts", content: "const mediaType = `image/jpg`;\n" },
+      { path: "src/background/bad4.ts", content: 'const mediaType = "IMAGE/JPG";\n' },
     ],
     clean: [{ path: "src/background/good.ts", content: 'const mediaType = "image/jpeg";\n' }],
   },
@@ -134,6 +145,18 @@ describe("locale parity", () => {
 });
 
 describe("repository scan", () => {
+  test("picks up source files whatever compilable extension they use", () => {
+    // Create a source file with an extension outside the obvious .ts/.js set
+    // and prove the scanner reaches it.
+    const probe = join("src", "rules-scan-probe.mts");
+    writeFileSync(probe, "// probe\n");
+    try {
+      expect(scanRepo().map((f) => f.path)).toContain("src/rules-scan-probe.mts");
+    } finally {
+      rmSync(probe);
+    }
+  });
+
   test("reaches every scaffolded area", () => {
     const paths = scanRepo().map((f) => f.path);
     for (const expected of [
