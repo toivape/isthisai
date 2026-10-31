@@ -16,18 +16,19 @@ Load the extension manually: `brave://extensions` > Developer mode > Load unpack
 ## Architecture (summary)
 - `src/background/` : service worker. Fetches image bytes, runs local checks (C2PA, XMP/IPTC), calls the OpenAI API, caches results. Only place that reads the API key.
 - `src/content/` : content script, injected by the worker only after a menu click (not declared in the manifest). UI only (TÄ badge, popup), all inside a Shadow DOM. No network calls except reading `blob:` image URLs, no key access.
-- `src/options/` : options page (API key, settings, privacy text).
+- `src/confirm/` : extension window for the OpenAI upload confirmation, and for results when the page cannot be injected.
+- `src/options/` : options page (write-only API key, test-key button, privacy text).
 - `src/shared/` : types and i18n helpers shared by all of the above.
 - Worker and content script talk through typed messages defined in `src/shared/types.ts`. Add new message types there first.
 
 ## Hard rules (do not break these)
 1. **Never scan pages automatically.** Checks run only after the user picks the context-menu item on an image. Nothing is injected into a page before that.
 2. **Never re-encode the image** (no canvas, no resizing) before analysis or upload. Always use the original bytes. Re-encoding destroys the metadata and the watermark.
-3. **The OpenAI API key** lives only in `chrome.storage.local`, is read only in the service worker, and is never logged, put in URLs, sent to content scripts, committed to the repo or printed in output. No hardcoded keys, no sample keys in tests.
+3. **The OpenAI API key** lives only in `chrome.storage.local` (access level `TRUSTED_CONTEXTS`), is read only in the service worker (the options page writes it but never reads it back), and is never logged, put in URLs, sent to content scripts, committed to the repo or printed in output. No hardcoded keys, no sample keys in tests.
 4. **Never set the `Content-Type` header manually** on the multipart upload to OpenAI. Use `FormData` and set the file part's real media type (`image/jpeg`, not `image/jpg`). Detect the type from magic bytes, not from headers or file extensions.
-5. **Ask the user before every OpenAI upload** (unless they ticked "don't ask again"). Local checks never leave the machine.
+5. **Ask the user before every OpenAI upload**, in the extension confirmation window, never in UI injected into the page (page scripts can restyle or hide it). No "don't ask again". Local checks never leave the machine.
 6. **synthid.com is out of scope** (no public API). Do not automate it, link to it or scrape it.
-7. **No remote code, no analytics, no tracking, no extra network requests** beyond fetching the chosen image and the confirmed OpenAI call.
+7. **No remote code, no analytics, no tracking, no extra network requests** beyond fetching the chosen image and the confirmed OpenAI call. Always call c2pa-wasm with `remote_manifest_fetch` and `ocsp_fetch` disabled; otherwise a crafted image makes it fetch an attacker's URL.
 8. **Wording:** results are "AI signal found" / "No AI signal found". Never write "real", "fake", "verified human" or "authentic". Always include the caveat that no signal does not prove the image is human-made.
 9. A C2PA manifest from a non-AI source (for example a camera) is **not** an AI signal. Show TÄ only when an AI-generation signal is detected (see verdict rule in `PLAN.md`).
 
@@ -61,6 +62,7 @@ Rules:
 - Use the real OpenAI API responses in `test/fixtures/openai-*.json` as parser fixtures.
 - Unit tests must not call the network. Live checks only via `npm run test:live`.
 - After each milestone: run `npm run typecheck`, `npm test` and `npm run build`, then list the manual checks from `PLAN.md` that the user should run in Brave.
+- You cannot run Brave. Never report a manual check or a spike measurement as done, and never invent measured values: list them for the owner to run.
 
 ## Working style
 - Work test-first (see "Development method: TDD").
