@@ -93,26 +93,40 @@ const noContentType: Rule = (path, content) =>
 const noImageJpg: Rule = (path, content) =>
   matches(path, content, "no-image-jpg", /(["'`])image\/jpg\1/i, "use image/jpeg, not image/jpg");
 
-// c2pa-wasm is allowed only in src/background/c2pa.ts, and that file must
-// disable remote fetches: a crafted image could otherwise make the wasm
-// fetch an attacker's URL (hard rule 7). Both flags must sit in the same
-// settings object; two half-configured objects are not a valid gate.
+// c2pa-wasm is allowed only in src/background/c2pa.ts, and every
+// WasmReader.fromBytes call there must pass a verify context with both
+// remote fetches disabled: a crafted image could otherwise make the wasm
+// fetch an attacker's URL (hard rule 7). Flags in an unused value, outside
+// verify, or a missing third argument are all treated as ungated.
 const c2paImportPattern = /@contentauth\/c2pa-wasm/;
-const c2paSettingsOk = (content: string): boolean => {
-  const collapsed = content.replace(/['"`\s]/g, "");
-  return (
-    collapsed.includes("remote_manifest_fetch:false,ocsp_fetch:false") ||
-    collapsed.includes("ocsp_fetch:false,remote_manifest_fetch:false")
-  );
-};
+const callPattern = /\.fromBytes\s*\(([^)]*)\)/g;
+const gatedLiteral = /verify:\s*\{\s*remote_manifest_fetch:\s*false\s*,\s*ocsp_fetch:\s*false\s*\}|verify:\s*\{\s*ocsp_fetch:\s*false\s*,\s*remote_manifest_fetch:\s*false\s*\}/;
+// collapseQuotes mirrors the scanner's collapse for JSON-string contexts:
+// '{"verify":{"remote_manifest_fetch":false,"ocsp_fetch":false}}'
+const collapseQuotes = (text: string): string => text.replace(/['"`\s]/g, "");
+const contextVariablePattern = (name: string): RegExp => new RegExp(`(?:const|let|var)\\s+${name}\\s*=\\s*([^;]+);`);
 const c2paWasmGated: Rule = (path, content) => {
   if (!c2paImportPattern.test(content)) return [];
-  if (path === "src/background/c2pa.ts") {
-    return c2paSettingsOk(content)
-      ? []
-      : [violation("c2pa-wasm-gated", path, 0, "c2pa-wasm without remote_manifest_fetch:false and ocsp_fetch:false in the same settings object")];
+  if (path !== "src/background/c2pa.ts") {
+    return [violation("c2pa-wasm-gated", path, 0, "c2pa-wasm imported outside src/background/c2pa.ts")];
   }
-  return [violation("c2pa-wasm-gated", path, 0, "c2pa-wasm imported outside src/background/c2pa.ts")];
+  return [...content.matchAll(callPattern)].flatMap((call) => {
+    const args = call[1];
+    const gated =
+      gatedLiteral.test(args) ||
+      collapseQuotes(args).includes("verify:{remote_manifest_fetch:false,ocsp_fetch:false") ||
+      collapseQuotes(args).includes("verify:{ocsp_fetch:false,remote_manifest_fetch:false");
+    if (gated) return [];
+    // The context may also be a variable: check its declaration.
+    const varMatch = args.match(/,\s*([A-Za-z_$][\w$]*)\s*\)?$/);
+    if (varMatch) {
+      const decl = content.match(contextVariablePattern(varMatch[1]));
+      if (decl && (gatedLiteral.test(decl[1]) || collapseQuotes(decl[1]).includes("verify:{remote_manifest_fetch:false,ocsp_fetch:false") || collapseQuotes(decl[1]).includes("verify:{ocsp_fetch:false,remote_manifest_fetch:false"))) {
+        return [];
+      }
+    }
+    return [violation("c2pa-wasm-gated", path, 0, "WasmReader.fromBytes without remote_manifest_fetch:false and ocsp_fetch:false under verify")];
+  });
 };
 
 // The API key may be named only where it is written or stored, never read

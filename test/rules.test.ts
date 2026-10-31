@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { join, sep } from "node:path";
 import { rmSync, writeFileSync } from "node:fs";
 import { localeParity, RULES, ruleViolations, scanRepo, type RuleId, type Violation } from "./rules";
 
@@ -11,10 +12,11 @@ const CASES: {
   {
     rule: "no-reencode",
     bad: [
-      {
-        path: "src/content/bad.ts",
-        content: 'const ctx = canvas.getContext("2d");\nconst off = new OffscreenCanvas(1, 1);\nconst url = img.toDataURL();\nimg.toBlob(() => {});\ncreateImageBitmap(img);\n',
-      },
+      { path: "src/content/bad.ts", content: "const ctx = canvas.getContext(\"2d\");\n" },
+      { path: "src/content/bad2.ts", content: "const off = new OffscreenCanvas(1, 1);\n" },
+      { path: "src/content/bad3.ts", content: "const url = img.toDataURL();\n" },
+      { path: "src/content/bad4.ts", content: "img.toBlob(() => {});\n" },
+      { path: "src/content/bad5.ts", content: "createImageBitmap(img);\n" },
     ],
     clean: [{ path: "src/content/good.ts", content: "const bytes = new Uint8Array(0);\n" }],
   },
@@ -49,8 +51,19 @@ const CASES: {
         content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nexport function read(bytes) {\n  return WasmReader.fromBytes("image/png", bytes);\n}\n',
       },
       {
+        // Flags present only in an unused value; the call itself is unconfigured.
         path: "src/background/c2pa.ts",
-        content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nconst remote = { verify: { remote_manifest_fetch: false } };\nconst ocsp = { verify: { ocsp_fetch: false } };\n',
+        content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nconst unused = { verify: { remote_manifest_fetch: false, ocsp_fetch: false } };\nexport function read(bytes) {\n  return WasmReader.fromBytes("image/png", bytes);\n}\n',
+      },
+      {
+        // Flags passed but not nested under verify.
+        path: "src/background/c2pa.ts",
+        content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nconst ctx = { remote_manifest_fetch: false, ocsp_fetch: false };\nexport function read(bytes) {\n  return WasmReader.fromBytes("image/png", bytes, ctx);\n}\n',
+      },
+      {
+        // Third argument present but no disabled-fetch settings anywhere.
+        path: "src/background/c2pa.ts",
+        content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nexport function read(bytes) {\n  return WasmReader.fromBytes("image/png", bytes, {});\n}\n',
       },
     ],
     clean: [
@@ -61,6 +74,16 @@ const CASES: {
       {
         path: "src/background/c2pa.ts",
         content: "import { WasmReader } from '@contentauth/c2pa-wasm';\nconst context = '{\"verify\":{\"remote_manifest_fetch\":false,\"ocsp_fetch\":false}}';\n",
+      },
+      {
+        // PLAN-canonical inline form: every call passes the context.
+        path: "src/background/c2pa.ts",
+        content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nexport function read(bytes: Uint8Array) {\n  return WasmReader.fromBytes("image/png", bytes, \'{"verify":{"remote_manifest_fetch":false,"ocsp_fetch":false}}\');\n}\n',
+      },
+      {
+        // Variable context with both flags under verify, either flag order.
+        path: "src/background/c2pa.ts",
+        content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nconst ctx = { verify: { ocsp_fetch: false, remote_manifest_fetch: false } };\nexport function read(bytes) {\n  return WasmReader.fromBytes("image/png", bytes, ctx);\n}\n',
       },
       { path: "src/background/check.ts", content: "// no c2pa here\n" },
     ],
@@ -81,8 +104,13 @@ const CASES: {
   {
     rule: "locale-forbidden-words",
     bad: [
-      { path: "_locales/en/messages.json", content: '{"a":{"message":"This is a real photo"},"b":{"message":"a verified human"},"c":{"message":"not fake or authentic"}}' },
-      { path: "_locales/fi/messages.json", content: '{"a":{"message":"aito kuva"},"b":{"message":"väärennös"}}' },
+      { path: "_locales/en/messages.json", content: '{"a":{"message":"a real photo"}}' },
+      { path: "_locales/en/messages.json", content: '{"a":{"message":"this is fake"}}' },
+      { path: "_locales/en/messages.json", content: '{"a":{"message":"authentic image"}}' },
+      { path: "_locales/en/messages.json", content: '{"a":{"message":"made by a verified human"}}' },
+      { path: "_locales/fi/messages.json", content: '{"a":{"message":"aito kuva"}}' },
+      { path: "_locales/fi/messages.json", content: '{"a":{"message":"tämä on väärennös"}}' },
+      { path: "_locales/fi/messages.json", content: '{"a":{"message":"väärennetty kuva"}}' },
     ],
     clean: [
       { path: "_locales/en/messages.json", content: '{"a":{"message":"No AI signal found"}}' },
@@ -155,12 +183,11 @@ describe("locale parity", () => {
 
 describe("repository scan", () => {
   test("picks up source files whatever compilable extension they use", () => {
-    // Create a source file with an extension outside the obvious .ts/.js set
-    // and prove the scanner reaches it.
-    const probe = join("src", "rules-scan-probe.mts");
+    // Unique name: the probe must never collide with, or delete, a real file.
+    const probe = join("src", `rules-scan-probe-${randomUUID()}.mts`);
     writeFileSync(probe, "// probe\n");
     try {
-      expect(scanRepo().map((f) => f.path)).toContain("src/rules-scan-probe.mts");
+      expect(scanRepo().map((f) => f.path)).toContain(probe.split(sep).join("/"));
     } finally {
       rmSync(probe);
     }

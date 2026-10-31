@@ -12,8 +12,14 @@ export function message(key: string, substitutions?: string[]): string {
 // Sets textContent of every [data-i18n] element from its data-i18n key.
 // __MSG_...__ substitution does not work inside extension HTML pages, so
 // pages start with data-i18n attributes and fill their text at runtime.
+// For documents (options/confirm pages) also declare the language, so
+// screen readers pronounce the loaded locale correctly. A ShadowRoot has
+// no lang of its own; the host page's lang must not be touched.
 export function applyI18n(root: Document | ShadowRoot): void {
   for (const el of root.querySelectorAll<HTMLElement>("[data-i18n]")) {
     el.textContent = message(el.dataset.i18n ?? "");
+  }
+  if ("documentElement" in root) {
+    root.documentElement.lang = chrome.i18n.getUILanguage();
   }
 }
