@@ -1,0 +1,32 @@
+{
+  "ext_name": {
+    "message": "Onko tämä tekoäly?"
+  },
+  "ext_description": {
+    "message": "Tarkista yhden kuvan tekoälyn merkit (Content Credentials, metadata) pyynnöstäsi. Mitään ei skannata automaattisesti."
+  },
+  "options_title": {
+    "message": "Onko tämä tekoäly? – Asetukset"
+  },
+  "options_headline": {
+    "message": "OpenAI:n API-avain"
+  },
+  "options_privacy": {
+    "message": "Paikalliset tarkistukset (Content Credentials ja kuvan metadata) suoritetaan tällä koneella, eikä mitään lähetetä mihinkään. OpenAI-tarkistus suoritetaan vain, kun vahvistat sen erillisessä ikkunassa; se lähettää kuvan OpenAIlle ja siitä voidaan veloittaa. Käytä siihen tarkoitukseen luotua projektiavainta kulurajan kera."
+  },
+  "confirm_title": {
+    "message": "Tarkistetaanko OpenAIlla?"
+  },
+  "confirm_headline": {
+    "message": "Lähetetäänkö tämä kuva OpenAIlle?"
+  },
+  "confirm_body": {
+    "message": "Kuva lähetetään OpenAIlle tekoälyn merkkien tarkistamista varten. Tarkistus voidaan veloittaa OpenAI-tililtäsi."
+  },
+  "confirm_upload_button": {
+    "message": "Lähetä"
+  },
+  "confirm_cancel_button": {
+    "message": "Peruuta"
+  }
+}

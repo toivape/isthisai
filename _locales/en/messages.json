@@ -1,0 +1,32 @@
+{
+  "ext_name": {
+    "message": "Is this AI?"
+  },
+  "ext_description": {
+    "message": "Check one image for AI-provenance signals (Content Credentials, metadata) on request. Nothing is scanned automatically."
+  },
+  "options_title": {
+    "message": "Is this AI? – Options"
+  },
+  "options_headline": {
+    "message": "OpenAI API key"
+  },
+  "options_privacy": {
+    "message": "Local checks (Content Credentials and image metadata) run on this machine and are never uploaded. An OpenAI check runs only after you confirm it in a separate window; it sends the image to OpenAI and may be billed. Use a dedicated project key with a spend limit."
+  },
+  "confirm_title": {
+    "message": "Check with OpenAI?"
+  },
+  "confirm_headline": {
+    "message": "Send this image to OpenAI?"
+  },
+  "confirm_body": {
+    "message": "This image will be sent to OpenAI to check for provenance signals. Checks may be billed to your OpenAI account."
+  },
+  "confirm_upload_button": {
+    "message": "Upload"
+  },
+  "confirm_cancel_button": {
+    "message": "Cancel"
+  }
+}

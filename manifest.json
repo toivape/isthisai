@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "default_locale": "en",
+  "name": "__MSG_ext_name__",
+  "description": "__MSG_ext_description__",
+  "version": "0.1.0",
+  "minimum_chrome_version": "156",
+  "permissions": ["contextMenus", "storage", "activeTab", "scripting"],
+  "host_permissions": ["https://api.openai.com/*"],
+  "optional_host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": false
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}
