@@ -41,6 +41,15 @@ Load the extension manually: `brave://extensions` > Developer mode > Load unpack
 - Injected UI must not inherit or leak page styles (Shadow DOM, no global CSS, no changes to the page's DOM beyond one host element).
 - Keep dependencies minimal. Ask before adding a new npm dependency or a new manifest permission, and say why it is needed.
 
+## MV3 and library traps
+Older examples on the web (and in model training data) are often wrong for this project:
+- No Manifest V2 patterns: no background pages, `chrome.extension.*`, `webRequestBlocking`, `executeScript` from `chrome.tabs`. Use `chrome.scripting` and an ES-module service worker.
+- The service worker can stop at any time: register listeners synchronously at top level, no top-level `await`, no important state in module variables (use `chrome.storage.session`).
+- Do not guess the c2pa-wasm API. Read `node_modules/@contentauth/c2pa-wasm/pkg/c2pa.d.ts` and the loader recipe in `PLAN.md`.
+- The JPEG media type is `image/jpeg`, never `image/jpg`.
+- Extension messages are JSON: never put an `ArrayBuffer`, `Uint8Array` or `Blob` in a message. Use base64 (see `PLAN.md` §3).
+- `test/rules.test.ts` enforces the hard rules by scanning the source. If it fails, fix the code; change an allowed exception only with a comment saying why, and mention it in the PR.
+
 ## Development method: TDD
 This project is built test-first. For every piece of logic:
 1. **Red:** write a failing test that describes the behaviour. Run it and confirm it fails for the right reason before writing any implementation.

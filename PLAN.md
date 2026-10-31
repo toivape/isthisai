@@ -318,6 +318,10 @@ Not an AI signal (show details in the popup, no TÄ):
 
 **Unit tests (Vitest):** magic-byte sniffing, XMP scanning in every container, C2PA mapping (runs `@contentauth/c2pa-wasm` in Node against the fixtures; asserts that `fetch` is never called, including for the remote-reference PNG), verdict (every row of the TÄ rule and the not-an-AI-signal cases), OpenAI request building, response parsing and error mapping, streaming size limit, cache rules, OpenAI flow decisions (expired check, sender mismatch, hash mismatch, server conversion, cancel).
 
+**Rules test:** `test/rules.test.ts` scans `src/`, `_locales/` and `manifest.json` for broken hard rules (re-encoding APIs, hand-set `Content-Type`, `image/jpg`, c2pa-wasm without remote fetches disabled, `apiKey` outside the worker and options page or in a log call, forbidden result words, differing locale keys, `content_scripts`/`externally_connectable`). Each rule is a pure function with a test that feeds it a known-bad snippet, so a rule that silently matches nothing is caught.
+
+**CI:** GitHub Actions runs `npm ci`, `typecheck`, `test` and `build` on every pull request and on pushes to `main`.
+
 **Mocking:** mock `fetch` for the OpenAI endpoint. No real API calls in `npm test`. `npm run test:live` uses a separate Vitest config that includes only `test/live/*.live.ts`; it reads `OPENAI_API_KEY` from the environment, checks the two fixtures against `test/fixtures/openai-*.json`, exits non-zero with a message when the key is missing, and never prints the key.
 
 **Manual test checklist** (run by the owner in Brave with the extension loaded via `brave://extensions` > Developer mode > Load unpacked):
