@@ -48,12 +48,21 @@ const CASES: {
         path: "src/background/c2pa.ts",
         content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nexport function read(bytes) {\n  return WasmReader.fromBytes("image/png", bytes);\n}\n',
       },
+      {
+        path: "src/background/c2pa.ts",
+        content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nconst remote = { verify: { remote_manifest_fetch: false } };\nconst ocsp = { verify: { ocsp_fetch: false } };\n',
+      },
     ],
     clean: [
       {
         path: "src/background/c2pa.ts",
         content: 'import { WasmReader } from "@contentauth/c2pa-wasm";\nconst context = { verify: { remote_manifest_fetch: false, ocsp_fetch: false } };\n',
       },
+      {
+        path: "src/background/c2pa.ts",
+        content: "import { WasmReader } from '@contentauth/c2pa-wasm';\nconst context = '{\"verify\":{\"remote_manifest_fetch\":false,\"ocsp_fetch\":false}}';\n",
+      },
+      { path: "src/background/check.ts", content: "// no c2pa here\n" },
     ],
   },
   {

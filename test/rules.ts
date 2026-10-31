@@ -95,16 +95,22 @@ const noImageJpg: Rule = (path, content) =>
 
 // c2pa-wasm is allowed only in src/background/c2pa.ts, and that file must
 // disable remote fetches: a crafted image could otherwise make the wasm
-// fetch an attacker's URL (hard rule 7).
+// fetch an attacker's URL (hard rule 7). Both flags must sit in the same
+// settings object; two half-configured objects are not a valid gate.
 const c2paImportPattern = /@contentauth\/c2pa-wasm/;
-const remoteFetchDisabled = /remote_manifest_fetch"?\s*:\s*false|remote_manifest_fetch'?\s*:\s*false/;
-const ocspFetchDisabled = /ocsp_fetch"?\s*:\s*false|ocsp_fetch'?\s*:\s*false/;
+const c2paSettingsOk = (content: string): boolean => {
+  const collapsed = content.replace(/['"`\s]/g, "");
+  return (
+    collapsed.includes("remote_manifest_fetch:false,ocsp_fetch:false") ||
+    collapsed.includes("ocsp_fetch:false,remote_manifest_fetch:false")
+  );
+};
 const c2paWasmGated: Rule = (path, content) => {
   if (!c2paImportPattern.test(content)) return [];
   if (path === "src/background/c2pa.ts") {
-    return remoteFetchDisabled.test(content) && ocspFetchDisabled.test(content)
+    return c2paSettingsOk(content)
       ? []
-      : [violation("c2pa-wasm-gated", path, 0, "c2pa-wasm without remote_manifest_fetch:false and ocsp_fetch:false")];
+      : [violation("c2pa-wasm-gated", path, 0, "c2pa-wasm without remote_manifest_fetch:false and ocsp_fetch:false in the same settings object")];
   }
   return [violation("c2pa-wasm-gated", path, 0, "c2pa-wasm imported outside src/background/c2pa.ts")];
 };
