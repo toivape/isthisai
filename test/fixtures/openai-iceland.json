@@ -1,0 +1,20 @@
+{
+  "object": "content_provenance_check",
+  "created_at": 1793451607,
+  "results": [
+    {
+      "type": "c2pa",
+      "generated_at": null,
+      "issuer": null,
+      "model": null,
+      "outcome": "not_detected",
+      "validation_state": "not_present"
+    },
+    {
+      "type": "synthid",
+      "generated_at": null,
+      "model": null,
+      "outcome": "not_detected"
+    }
+  ]
+}
