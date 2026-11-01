@@ -10,6 +10,8 @@ const NON_BUNDLED_FILES = [
   ...readdirSync("_locales").flatMap((localeDir) =>
     readdirSync(join("_locales", localeDir)).map((file) => resolve("_locales", localeDir, file)),
   ),
+  resolve("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm"),
+  resolve("test/fixtures/ai-test-halloween.png"),
 ];
 
 function copyExtensionFiles(): Plugin {
@@ -21,6 +23,11 @@ function copyExtensionFiles(): Plugin {
       }
     },
     closeBundle() {
+      // M0 spike (issue #2): wasm and fixture are loaded by URL from the
+      // extension bundle, not imported.
+      mkdirSync("dist/spike", { recursive: true });
+      cpSync("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm", "dist/c2pa.wasm");
+      cpSync("test/fixtures/ai-test-halloween.png", "dist/spike/ai-test-halloween.png");
       mkdirSync("dist/_locales", { recursive: true });
       cpSync("manifest.json", "dist/manifest.json");
       cpSync("_locales", "dist/_locales", { recursive: true });

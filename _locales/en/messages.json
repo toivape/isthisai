@@ -28,5 +28,8 @@
   },
   "confirm_cancel_button": {
     "message": "Cancel"
+  },
+  "spike_menu": {
+    "message": "Spike: test c2pa-wasm in the service worker"
   }
 }
