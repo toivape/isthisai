@@ -16,5 +16,8 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "@contentauth/c2pa-wasm": "0.13.4"
   }
 }

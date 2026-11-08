@@ -55,6 +55,14 @@ Work through the milestones in order. Each has acceptance criteria; do not start
     - `ai-tes-iceland.jpg`: throws `C2pa(JumbfNotFound)`. This means "no manifest". GIF, WebP and JPEG files without a manifest give the same error. Truncated or garbage files give `InvalidAsset`.
   - **It makes network requests by default.** An image whose XMP contains `dcterms:provenance="<url>"` (a remote manifest reference) makes `fromBytes` call `fetch(<url>)`, so any page could use a checked image as a tracking beacon. Passing `{"verify":{"remote_manifest_fetch":false,"ocsp_fetch":false}}` as `contextJson` stops it; the call then fails with `C2pa(RemoteManifestUrl("<url>"))` and no fetch happens. **Always pass this setting.**
   - The `.wasm` is about 9 MB. The glue has no default wasm URL; pass the module or `chrome.runtime.getURL(...)` explicitly.
+  - **Verified in the MV3 service worker (M0 spike, 2026-11-08; Brave 1.99.55, Chromium 157.0.8103.39, arm64; `@contentauth/c2pa-wasm` 0.13.4): it runs.** Owner-measured on the halloween fixture with remote fetches disabled:
+    - Warm worker: wasm init 21 ms, fixture fetch 4 ms, parse 160 ms, total 185 ms.
+    - Cold worker (stopped via `brave://serviceworker-internals`, then a menu click): init 41 ms, fetch 5 ms, parse 444 ms, total 489 ms.
+    - Manifest as in Node: issuer "OpenAI OpCo, LLC", `softwareAgent` "ChatGPT / gpt-image", `trainedAlgorithmicMedia`, watermarked, `validation_state: "Valid"`.
+    - **Loader recipe:** import the glue with a **static** `import init, { WasmReader } from "@contentauth/c2pa-wasm"`. Dynamic `import()` is banned in the service worker global scope (HTML spec, [w3c/ServiceWorker#1356](https://github.com/w3c/ServiceWorker/issues/1356)) and throws `TypeError: import() is disallowed on ServiceWorkerGlobalScope`. Enforced by the `no-dynamic-import` rule in `test/rules.ts`.
+    - Vite trap: dynamic imports are wrapped in `__vitePreload`, whose error path calls `window.dispatchEvent`; with no `window` in the worker that ReferenceError **masks the real error** (it hid the TypeError above in the first spike build). Static imports produce no wrapper.
+    - Initialise lazily inside the event handler (no top-level `await`; register listeners synchronously): `init({ module_or_path: chrome.runtime.getURL("c2pa.wasm") })`, cache the promise, drop it on rejection so the next click retries; `reader.free()` in `finally`.
+    - Build config: `closeBundle` copies `node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm` → `dist/c2pa.wasm`; the static import bundles the ~22 KB glue into `background.js`. CSP needs `'wasm-unsafe-eval'` (already in the manifest).
 - **exifr** (considered for XMP) supports only JPEG, TIFF, PNG, HEIC, AVIF (no WebP, no GIF) and has not been released since May 2022. Not used.
 - **Chrome extension facts (developer.chrome.com, checked 2026-10-31):**
   - Extension messaging uses JSON serialisation; the maximum message size is 64 MiB.
@@ -122,7 +130,7 @@ Storage:
 
 ### Tech choices
 - TypeScript, Vite (or esbuild) multi-entry build, Vitest for unit tests.
-- `@contentauth/c2pa-wasm` for Content Credentials, pinned to an exact version in `package.json` (no `^`/`~`; 0.x releases change the API and the settings format). Upgrade deliberately, with the fixture tests as the gate. Called via `WasmReader.fromBytes` directly in the service worker, always with remote fetches disabled (section 2). Needs `'wasm-unsafe-eval'` in the extension CSP and the `.wasm` bundled in the extension. Initialise lazily inside the event handler (module service workers do not allow top-level `await`; listeners must be registered synchronously). Call `free()` on readers. If the M0 spike shows it cannot run in the worker, fall back to an offscreen document (`chrome.offscreen`) and add the `offscreen` permission.
+- `@contentauth/c2pa-wasm` for Content Credentials, pinned to an exact version in `package.json` (no `^`/`~`; 0.x releases change the API and the settings format). Upgrade deliberately, with the fixture tests as the gate. Called via `WasmReader.fromBytes` directly in the service worker, always with remote fetches disabled (section 2). Needs `'wasm-unsafe-eval'` in the extension CSP and the `.wasm` bundled in the extension. **Static import only** — dynamic `import()` is banned in the service worker global scope (verified by the M0 spike, section 2; enforced by the `no-dynamic-import` rule). Initialise lazily inside the event handler (module service workers do not allow top-level `await`; listeners must be registered synchronously). Call `free()` on readers.
 - No C2PA trust list in v0.1 (bundling one goes stale; downloading one breaks the no-extra-requests rule). Locally read issuer and model are shown as **claimed (signer not verified)**.
 - XMP: a small own scanner that finds the XMP packet (`<x:xmpmeta` … `</x:xmpmeta>`) in the raw bytes, which works for JPEG, PNG (uncompressed iTXt), WebP, GIF and AVIF/HEIC alike. Compressed PNG text chunks are not supported (documented limitation). No XMP library.
 - No remote code, no analytics, no external fonts.
@@ -165,7 +173,7 @@ Storage:
 ```
 
 ### Manifest outline (MV3)
-- `permissions`: `contextMenus`, `storage`, `activeTab`, `scripting` (add `offscreen` only if the C2PA spike needs it).
+- `permissions`: `contextMenus`, `storage`, `activeTab`, `scripting` (~~add `offscreen` only if the C2PA spike needs it~~ not needed: the spike proved c2pa-wasm runs in the worker).
 - `host_permissions`: `https://api.openai.com/*`.
 - `optional_host_permissions: ["<all_urls>"]`, requested once at first use ("Allow the extension to download images you check"). Needed because `activeTab` covers only the main frame's origin; images from another origin (CDN) and cross-origin iframes need it.
 - No `content_scripts` entry. No `externally_connectable`.
@@ -257,7 +265,7 @@ Not an AI signal (show details in the popup, no TÄ):
 
 ## 5. UI behaviour
 
-**Trigger:** one context menu item on images: title "Check for AI signals" / "Tarkista tekoälyn merkit". Uses `contexts: ["image"]`; click info gives `srcUrl`, `frameUrl` and `frameId`.
+**Trigger:** one context menu item on images: title "Check for AI signals" / "Tarkista tekoälyn merkit". Uses `contexts: ["image"]`; click info gives `srcUrl`, `frameUrl` and `frameId`. The worker restarts constantly (any event, ~30 s idle), so registration must be idempotent: `contextMenus.removeAll(() => create(...))` — a bare `create()` logs `Cannot create item with duplicate id` on every restart (seen in the M0 spike).
 
 **Known limitation:** on sites that lay a transparent element over images (for example Instagram, Pinterest), the right-click hits that element, so the browser does not offer the image menu item. Workaround for users: open the image in its own tab and right-click it there. State this in the README.
 
@@ -318,7 +326,7 @@ Not an AI signal (show details in the popup, no TÄ):
 
 **Unit tests (Vitest):** magic-byte sniffing, XMP scanning in every container, C2PA mapping (runs `@contentauth/c2pa-wasm` in Node against the fixtures; asserts that `fetch` is never called, including for the remote-reference PNG), verdict (every row of the TÄ rule and the not-an-AI-signal cases), OpenAI request building, response parsing and error mapping, streaming size limit, cache rules, OpenAI flow decisions (expired check, sender mismatch, hash mismatch, server conversion, cancel).
 
-**Rules test:** `test/rules.test.ts` scans `src/`, `_locales/` and `manifest.json` for broken hard rules (re-encoding APIs, hand-set `Content-Type`, `image/jpg`, c2pa-wasm without remote fetches disabled, `apiKey` outside the worker and options page or in a log call, forbidden result words, differing locale keys, `content_scripts`/`externally_connectable`). Each rule is a pure function with a test that feeds it a known-bad snippet, so a rule that silently matches nothing is caught.
+**Rules test:** `test/rules.test.ts` scans `src/`, `_locales/` and `manifest.json` for broken hard rules (re-encoding APIs, hand-set `Content-Type`, `image/jpg`, c2pa-wasm without remote fetches disabled, `apiKey` outside the worker and options page or in a log call, forbidden result words, differing locale keys, dynamic `import()` in the service worker, `content_scripts`/`externally_connectable`). Each rule is a pure function with a test that feeds it a known-bad snippet, so a rule that silently matches nothing is caught.
 
 **CI:** GitHub Actions runs `npm ci`, `typecheck`, `test` and `build` on every pull request and on pushes to `main`.
 
@@ -346,7 +354,7 @@ Not an AI signal (show details in the popup, no TÄ):
 **M0. Scaffold and spike**
 - Repo, TypeScript, build, manifest, empty service worker, message and storage types from section 3, i18n wrapper, loads in Brave without errors.
 - Spike (throwaway code written by the implementer, measurements run by the owner in Brave, results written into this plan):
-  1. `@contentauth/c2pa-wasm` in the service worker: loads with `'wasm-unsafe-eval'` and lazy init, parses the halloween fixture with remote fetches disabled, no top-level `await` in the built worker, cold-start and parse time. If it fails, try the offscreen document. Record the exact loader code and build config.
+  1. `@contentauth/c2pa-wasm` in the service worker: loads with `'wasm-unsafe-eval'` and lazy init, parses the halloween fixture with remote fetches disabled, no top-level `await` in the built worker, cold-start and parse time. ~~If it fails, try the offscreen document.~~ **Done 2026-11-08: it runs; recipe and owner timings in section 2.** Record the exact loader code and build config.
   2. Messaging: confirm a 60 MiB base64 string arrives via `tabs.sendMessage` reply.
   3. `chrome.permissions.request` inside `contextMenus.onClicked`: allowed or not. Does `permissions.contains` report the `activeTab` grant?
   4. Injection into a cross-origin iframe's `frameId` with only `activeTab`: works or fails.
