@@ -128,6 +128,17 @@ const CASES: {
       { path: "src/background/bad.json", content: '{"content_scripts": []}' },
     ],
   },
+  {
+    rule: "no-dynamic-import",
+    bad: [
+      { path: "src/background/index.ts", content: 'const { read } = await import("./c2pa");\n' },
+      { path: "src/background/check.ts", content: "const m = import(`./c2pa`);\n" },
+    ],
+    clean: [
+      { path: "src/background/index.ts", content: 'import { read } from "./c2pa";\n' },
+      { path: "src/content/index.ts", content: 'const m = await import("./c2pa");\n' },
+    ],
+  },
 ];
 
 // Each entry waives ALL violations of `rule` in `path`.

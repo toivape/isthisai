@@ -8,7 +8,8 @@ export type PerFileRuleId =
   | "c2pa-wasm-gated"
   | "api-key-placement"
   | "locale-forbidden-words"
-  | "manifest-clean";
+  | "manifest-clean"
+  | "no-dynamic-import";
 
 export type RuleId = PerFileRuleId | "locale-parity";
 
@@ -200,9 +201,15 @@ function walkMessages(
   }
 }
 
+// import() is banned in the service worker global scope by the HTML spec
+// (Chromium has not shipped it); only static imports work there.
+const noDynamicImport: Rule = (path, content) =>
+  path.startsWith("src/background/")
+    ? matches(path, content, "no-dynamic-import", /\bimport\s*\(/, "dynamic import() in the service worker")
+    : [];
+
 // The manifest must not auto-inject or expose the extension to web pages.
-const manifestClean: Rule = (path, content) => {
-  if (path !== "manifest.json") return [];
+const manifestClean: Rule = (path, content) => {  if (path !== "manifest.json") return [];
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -228,6 +235,7 @@ export const RULES: Record<PerFileRuleId, Rule> = {
   "api-key-placement": apiKeyPlacement,
   "locale-forbidden-words": localeForbiddenWords,
   "manifest-clean": manifestClean,
+  "no-dynamic-import": noDynamicImport,
 };
 
 export function ruleViolations(files: RepoFile[]): Violation[] {
