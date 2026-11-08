@@ -8,7 +8,8 @@
     "build": "vite build && vite build --config vite.content.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:live": "vitest run --config vitest.live.config.ts"
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "spike:server": "node scripts/spike-server.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.7",

@@ -28,5 +28,32 @@
   },
   "confirm_cancel_button": {
     "message": "Peruuta"
+  },
+  "spike_menu_srcurl": {
+    "message": "SPIKE srcUrl: kirjaa tämä kuva (Q6)"
+  },
+  "spike_menu_msg60": {
+    "message": "SPIKE 60 MiB viesti (Q1)"
+  },
+  "spike_menu_perm_check": {
+    "message": "SPIKE käyttöoikeudet: vain tarkistus (Q2)"
+  },
+  "spike_menu_perm_request": {
+    "message": "SPIKE käyttöoikeudet: pyydä <all_urls> (Q2)"
+  },
+  "spike_menu_iframe": {
+    "message": "SPIKE injektoi tähän kehykseen (Q3)"
+  },
+  "spike_menu_slow_headers": {
+    "message": "SPIKE 30 s: lataus, otsakkeet myöhässä (Q4)"
+  },
+  "spike_menu_slow_body": {
+    "message": "SPIKE 30 s: lataus, hidas runko (Q4)"
+  },
+  "spike_menu_slow_upload": {
+    "message": "SPIKE 30 s: 40 MiB hidas lähetys (Q4)"
+  },
+  "spike_menu_storage": {
+    "message": "SPIKE tallennustilan käyttötaso (Q5)"
   }
 }
