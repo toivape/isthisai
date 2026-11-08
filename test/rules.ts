@@ -209,7 +209,8 @@ const noDynamicImport: Rule = (path, content) =>
     : [];
 
 // The manifest must not auto-inject or expose the extension to web pages.
-const manifestClean: Rule = (path, content) => {  if (path !== "manifest.json") return [];
+const manifestClean: Rule = (path, content) => {
+  if (path !== "manifest.json") return [];
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
