@@ -28,8 +28,5 @@
   },
   "confirm_cancel_button": {
     "message": "Peruuta"
-  },
-  "spike_menu": {
-    "message": "Koeajo: testaa c2pa-wasm-palvelutyöntekijässä"
   }
 }
