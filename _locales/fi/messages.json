@@ -28,5 +28,23 @@
   },
   "confirm_cancel_button": {
     "message": "Peruuta"
+  },
+  "menu_check_ai_signals": {
+    "message": "Tarkista tekoälyn merkit"
+  },
+  "popup_headline_checking": {
+    "message": "Tarkistetaan tekoälyn merkkejä…"
+  },
+  "popup_headline_ai_signal": {
+    "message": "Tekoälyn merkki löytyi"
+  },
+  "popup_caveat_no_signal": {
+    "message": "Se ei todista, että kuva on ihmisen tekemä."
+  },
+  "badge_tooltip": {
+    "message": "Tekoäly"
+  },
+  "confirm_title_result": {
+    "message": "Onko tämä tekoäly? – Tulos"
   }
 }
