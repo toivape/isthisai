@@ -1,47 +1,54 @@
-// M0 spike #3: local test server for the 30 s worker-survival measurements.
-// THROWAWAY, removed before merge. Owner runs: npm run spike:server
+// M0 spike #3: local test server for the 30 s worker-survival measurements
+// and the cross-origin iframe page. THROWAWAY, removed before merge.
+// Owner runs: npm run spike:server
 //
-// Endpoints (127.0.0.1:8123), all ~1 MB/s so each phase takes ~42 s with NO
-// DevTools throttling needed:
+// Ports (loopback only):
+//   8123  main:  GET /slow-headers.png, GET /slow-body.png, POST /slow-upload,
+//                GET /iframe-site.html (the page you open), GET /tiny.png
+//   8124  inner: GET /iframe-img.html (the cross-origin iframe content)
+//   A different port is a different origin, so the iframe on 8123 embedding
+//   a page from 8124 is genuinely cross-origin (no localhost/127.0.0.1 tricks).
+//
+// Speeds (~1 MB/s, so each phase takes ~42 s with NO DevTools throttling):
 //   GET  /slow-headers.png -> headers delayed 35 s, then 40 MiB fast.
 //     Tests the documented kill condition "fetch() response takes >30 s to
 //     arrive". Worker death shows as no [spike:30s] line in the console.
 //   GET  /slow-body.png    -> headers immediately, body at ~1 MB/s (~42 s).
 //   POST /slow-upload      -> reads a 40 MiB body at ~1 MB/s, replies "bytes=N".
-//   GET  /iframe-site.html -> a page with an <img> and a cross-origin iframe
-//                             (localhost vs 127.0.0.1) for the Q3 injection
-//                             test. Open it via the OTHER hostname than the
-//                             one in the address bar of the iframe.
+//
+// Every response carries CORS headers and OPTIONS is answered, because the
+// extension worker has no host permission for this origin.
 
 import { createServer } from "node:http";
 
 const PORT = 8123;
+const IFRAME_PORT = 8124;
 const TOTAL_BYTES = 40 * 1024 * 1024;
 const CHUNK = 64 * 1024;
-const CHUNK_DELAY_MS = 60; // 64 KiB per 60 ms ≈ 1.05 MiB/s ≈ 42 s for 40 MiB
+const CHUNK_DELAY_MS = 60; // 64 KiB per 60 ms ~= 1.05 MiB/s ~= 42 s for 40 MiB
 const HEADER_DELAY_MS = 35_000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// The iframe page must load over the OPPOSITE origin of its parent, so the
-// owner opens the parent via localhost and the iframe points at 127.0.0.1
-// (or vice versa): the two hostnames are different origins.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "*",
+  "Access-Control-Max-Age": "86400",
+  "Access-Control-Allow-Private-Network": "true",
+};
+
 const IFRAME_SITE_HTML = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>isthisai spike iframe page</title></head>
 <body>
-  <h3>isthisai spike: cross-origin iframe test (Q3)</h3>
-  <p>Parent origin: <code id="origin"></code></p>
-  <img src="/tiny.png" alt="tiny image in the parent" width="32">
-  <iframe id="cross" width="640" height="360" title="cross-origin iframe with an image"></iframe>
-  <script>
-    document.getElementById("origin").textContent = location.origin;
-    // Point the iframe at the other hostname: same port, different origin.
-    const here = location.hostname;
-    const other = here === "localhost" ? "127.0.0.1" : "localhost";
-    document.getElementById("cross").src =
-      location.protocol + "//" + other + ":" + location.port + "/iframe-img.html";
-  </script>
+  <h3>isthisai spike: cross-origin iframe test</h3>
+  <p>This page is served from port ${PORT}; the gray box below is an iframe
+     served from port ${IFRAME_PORT} &mdash; a different origin.</p>
+  <img src="/tiny.png" alt="tiny image in the parent page" width="32">
+  <iframe id="cross" width="640" height="360"
+          src="http://127.0.0.1:${IFRAME_PORT}/iframe-img.html"
+          title="cross-origin iframe with an image"></iframe>
 </body>
 </html>`;
 
@@ -49,9 +56,8 @@ const IFRAME_IMG_HTML = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>iframe inner</title></head>
 <body style="background:#eee">
-  <p>Inner origin: <code id="origin"></code></p>
+  <p>Inner page (different origin). The image below is inside the iframe:</p>
   <img src="/tiny.png" alt="tiny image inside the cross-origin iframe" width="64">
-  <script>document.getElementById("origin").textContent = location.origin;</script>
 </body>
 </html>`;
 
@@ -63,13 +69,18 @@ const TINY_PNG = Buffer.from(
   "hex",
 );
 
-const server = createServer(async (req, res) => {
+async function handle(req, res) {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, CORS);
+    res.end();
+    return;
+  }
   const url = req.url ?? "/";
   try {
     if (req.method === "GET" && url === "/slow-headers.png") {
       console.log(`[spike-server] GET /slow-headers.png — headers in ${HEADER_DELAY_MS / 1000} s, then 40 MiB fast`);
       await sleep(HEADER_DELAY_MS);
-      res.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(TOTAL_BYTES) });
+      res.writeHead(200, { ...CORS, "Content-Type": "image/png", "Content-Length": String(TOTAL_BYTES) });
       let sent = 0;
       while (sent < TOTAL_BYTES) {
         const take = Math.min(CHUNK, TOTAL_BYTES - sent);
@@ -82,7 +93,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url === "/slow-body.png") {
       console.log(`[spike-server] GET /slow-body.png — 40 MiB at ~1 MB/s (~42 s)`);
-      res.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(TOTAL_BYTES) });
+      res.writeHead(200, { ...CORS, "Content-Type": "image/png", "Content-Length": String(TOTAL_BYTES) });
       let sent = 0;
       while (sent < TOTAL_BYTES) {
         const take = Math.min(CHUNK, TOTAL_BYTES - sent);
@@ -116,37 +127,40 @@ const server = createServer(async (req, res) => {
         });
         req.on("error", reject);
       });
-      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.writeHead(200, { ...CORS, "Content-Type": "text/plain" });
       res.end(`bytes=${TOTAL_BYTES}`);
       return;
     }
     if (req.method === "GET" && (url === "/" || url === "/iframe-site.html")) {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.writeHead(200, { ...CORS, "Content-Type": "text/html; charset=utf-8" });
       res.end(IFRAME_SITE_HTML);
       return;
     }
     if (req.method === "GET" && url === "/iframe-img.html") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.writeHead(200, { ...CORS, "Content-Type": "text/html; charset=utf-8" });
       res.end(IFRAME_IMG_HTML);
       return;
     }
     if (req.method === "GET" && url === "/tiny.png") {
-      res.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(TINY_PNG.length) });
+      res.writeHead(200, { ...CORS, "Content-Type": "image/png", "Content-Length": String(TINY_PNG.length) });
       res.end(TINY_PNG);
       return;
     }
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("spike server: GET /slow-headers.png, GET /slow-body.png, POST /slow-upload, GET /iframe-site.html");
+    res.writeHead(404, { ...CORS, "Content-Type": "text/plain" });
+    res.end("spike server: use /iframe-site.html, /slow-headers.png, /slow-body.png, POST /slow-upload");
   } catch (e) {
     console.error("[spike-server] error:", e);
-    if (!res.headersSent) res.writeHead(500);
+    if (!res.headersSent) res.writeHead(500, CORS);
     res.end();
   }
-});
+}
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[spike-server] listening on http://127.0.0.1:${PORT}`);
-  console.log(`[spike-server] GET  /slow-headers.png : headers after 35 s, then 40 MiB fast`);
-  console.log(`[spike-server] GET  /slow-body.png    : headers now, 40 MiB at ~1 MB/s (~42 s)`);
-  console.log(`[spike-server] POST /slow-upload      : 40 MiB at ~1 MB/s, reply after ~42 s`);
+const main = createServer(handle);
+main.listen(PORT, "127.0.0.1", () => {
+  console.log(`[spike-server] main  : http://127.0.0.1:${PORT}  (open /iframe-site.html in Brave)`);
+  console.log(`[spike-server] slow endpoints: GET /slow-headers.png (headers after 35 s), GET /slow-body.png (~42 s), POST /slow-upload (~42 s)`);
+});
+const inner = createServer(handle);
+inner.listen(IFRAME_PORT, "127.0.0.1", () => {
+  console.log(`[spike-server] inner : http://127.0.0.1:${IFRAME_PORT}  (serves the cross-origin iframe page)`);
 });

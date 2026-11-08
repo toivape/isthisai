@@ -107,10 +107,14 @@ async function measureMessageSize(tabId: number, frameId: number): Promise<void>
 async function permCheck(info: chrome.contextMenus.OnClickData, tab: chrome.tabs.Tab): Promise<void> {
   const tabOrigin = originOf(tab.url);
   const frameOrigin = originOf(info.frameUrl ?? tab.url);
+  // permissions.contains/request take match patterns, not bare origins;
+  // "<all_urls>" and the tab-origin pattern both work there.
   const containsAllUrls = await chrome.permissions.contains({
     origins: ["<all_urls>"],
   });
-  const containsTabOrigin = await chrome.permissions.contains({ origins: [tabOrigin] });
+  const containsTabOrigin = await chrome.permissions.contains({
+    origins: [matchPatternOf(tabOrigin)],
+  });
   log(
     permCheckLine({
       tabOrigin,
@@ -119,6 +123,11 @@ async function permCheck(info: chrome.contextMenus.OnClickData, tab: chrome.tabs
       containsTabOrigin,
     }),
   );
+}
+
+function matchPatternOf(origin: string): string {
+  if (!/^https?:\/\/[^/]+\/?$/.test(origin)) return origin + "/*";
+  return origin.endsWith("/") ? origin + "*" : origin + "/*";
 }
 
 async function permRequest(): Promise<void> {
