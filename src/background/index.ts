@@ -48,5 +48,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   void chrome.scripting
     .executeScript({ target: { tabId, frameIds: [frameId] }, files: ["content/index.js"] })
     .then(() => chrome.tabs.sendMessage(tabId, update, { frameId }))
-    .catch(openResultWindow);
+    .catch((error: unknown) => {
+      console.error("injection failed", error);
+      openResultWindow();
+    });
 });

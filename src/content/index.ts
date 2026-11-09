@@ -4,6 +4,7 @@
 // no key access, no network. Injected only after a menu click, never via a
 // manifest content_scripts entry (hard rule 1).
 
+import { isBadgeVisible, shouldBadge } from "./badge";
 import { findImages } from "./findImages";
 import { installOnce } from "./installOnce";
 import { message } from "../shared/i18n";
@@ -15,6 +16,18 @@ export interface ContentShell {
 }
 
 const INSTANCE_KEY = "isthisai.contentShell";
+// Inline !important beats page rules like `div { transform: … }`, which would
+// otherwise turn the host into the containing block of the fixed children.
+const HOST_RESET: ReadonlyArray<readonly [string, string]> = [
+  ["all", "initial"],
+  ["display", "block"],
+  ["position", "static"],
+  ["transform", "none"],
+  ["filter", "none"],
+  ["perspective", "none"],
+  ["contain", "none"],
+  ["will-change", "auto"],
+];
 const BASE_STYLE = `
   :host { all: initial; }
   .isthisai-badge {
@@ -40,6 +53,7 @@ interface PopupHandle {
 
 function createShell(): ContentShell {
   const host = document.createElement("div");
+  for (const [property, value] of HOST_RESET) host.style.setProperty(property, value, "important");
   const shadow = host.attachShadow({ mode: "closed" });
   const style = document.createElement("style");
   style.textContent = BASE_STYLE;
@@ -68,11 +82,13 @@ function createShell(): ContentShell {
     shadow.appendChild(overlay);
 
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (!event.isTrusted) return;
       if (event.key === "Escape") close();
     };
     // A closed shadow root retargets its events to the host, so any click
     // whose target is not the host is an outside click.
     const onOutside = (event: MouseEvent): void => {
+      if (!event.isTrusted) return;
       if (event.target !== host) close();
     };
     const close = (): void => {
@@ -87,12 +103,21 @@ function createShell(): ContentShell {
 
   function positionBadge(badge: HTMLDivElement, img: HTMLImageElement): void {
     const rect = img.getBoundingClientRect();
+    const viewport = { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight };
+    badge.style.display = isBadgeVisible(rect, viewport, img.isConnected) ? "" : "none";
     badge.style.top = `${Math.max(4, rect.top + 4)}px`;
     badge.style.left = `${Math.max(4, rect.right - badge.offsetWidth - 4)}px`;
   }
 
   function repositionBadges(): void {
-    for (const [img, badge] of badges) positionBadge(badge, img);
+    for (const [img, badge] of badges) {
+      if (!img.isConnected) {
+        badge.remove();
+        badges.delete(img);
+      } else {
+        positionBadge(badge, img);
+      }
+    }
   }
 
   // Badges use fixed positioning; keep them on their images while the page
@@ -106,9 +131,10 @@ function createShell(): ContentShell {
     badge.className = "isthisai-badge";
     badge.textContent = "TÄ";
     badge.title = message("badge_tooltip");
-    badge.addEventListener("click", () => {
+    badge.addEventListener("click", (event) => {
+      if (!event.isTrusted) return;
       closePopup();
-      popup = showPopup("popup_headline_ai_signal", "popup_caveat_no_signal");
+      popup = showPopup("popup_headline_ai_signal");
     });
     shadow.appendChild(badge);
     positionBadge(badge, img);
@@ -119,6 +145,7 @@ function createShell(): ContentShell {
     if (!isCheckUpdate(update)) return;
     closePopup();
     popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
+    if (!shouldBadge(update)) return;
     for (const img of findImages(update.srcUrl)) {
       addBadge(img);
     }

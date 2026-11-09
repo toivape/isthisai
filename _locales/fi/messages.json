@@ -39,7 +39,7 @@
     "message": "Tekoälyn merkki löytyi"
   },
   "popup_caveat_no_signal": {
-    "message": "Se ei todista, että kuva on ihmisen tekemä."
+    "message": "Tekoälyn merkin puuttuminen ei todista, että kuva on ihmisen tekemä."
   },
   "badge_tooltip": {
     "message": "Tekoäly"

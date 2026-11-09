@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { matchesSrcUrl } from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
+import { isBadgeVisible, shouldBadge } from "../src/content/badge";
+import { readFileSync } from "node:fs";
+import type { CheckUpdate } from "../src/shared/types";
 import type { ContentShell } from "../src/content/index";
 
 // Hand-rolled fakes in the style of test/i18n.test.ts: matchesSrcUrl reads
@@ -88,3 +91,81 @@ describe("installOnce", () => {
 function shellWithMarker(marker: unknown): ContentShell {
   return { handleCheckUpdate: () => {} , marker } as unknown as ContentShell;
 }
+
+describe("isBadgeVisible", () => {
+  const viewport = { width: 1000, height: 800 };
+  const rect = (top: number, left: number, width: number, height: number) => ({
+    top,
+    left,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+  });
+
+  test("visible when the image is inside the viewport", () => {
+    expect(isBadgeVisible(rect(100, 100, 200, 150), viewport, true)).toBe(true);
+  });
+
+  test("visible when the image is partly scrolled out", () => {
+    expect(isBadgeVisible(rect(-100, 100, 200, 150), viewport, true)).toBe(true);
+  });
+
+  test("hidden when the image is fully above the viewport", () => {
+    expect(isBadgeVisible(rect(-300, 100, 200, 150), viewport, true)).toBe(false);
+  });
+
+  test("hidden when the image is fully below the viewport", () => {
+    expect(isBadgeVisible(rect(900, 100, 200, 150), viewport, true)).toBe(false);
+  });
+
+  test("hidden when the image is fully left or right of the viewport", () => {
+    expect(isBadgeVisible(rect(100, -500, 200, 150), viewport, true)).toBe(false);
+    expect(isBadgeVisible(rect(100, 1200, 200, 150), viewport, true)).toBe(false);
+  });
+
+  test("hidden when the image has no size (display: none)", () => {
+    expect(isBadgeVisible(rect(100, 100, 0, 0), viewport, true)).toBe(false);
+  });
+
+  test("hidden when the image is disconnected from the document", () => {
+    expect(isBadgeVisible(rect(100, 100, 200, 150), viewport, false)).toBe(false);
+  });
+});
+
+describe("shouldBadge", () => {
+  const result = (verdict: "ai_signal" | "no_signal" | "incomplete") =>
+    ({
+      type: "checkUpdate",
+      checkId: "c",
+      srcUrl: "https://example.com/a.png",
+      status: "done",
+      openai: { available: false, reason: "no_key" },
+      result: { verdict },
+    }) as unknown as CheckUpdate;
+
+  test("badges only a finished check with an AI signal", () => {
+    expect(shouldBadge(result("ai_signal"))).toBe(true);
+  });
+
+  test("does not badge no_signal or incomplete results", () => {
+    expect(shouldBadge(result("no_signal"))).toBe(false);
+    expect(shouldBadge(result("incomplete"))).toBe(false);
+  });
+
+  test("does not badge a check in progress or a failed check", () => {
+    const base = { type: "checkUpdate", checkId: "c", srcUrl: "https://example.com/a.png" };
+    expect(shouldBadge({ ...base, status: "checking" } as CheckUpdate)).toBe(false);
+    expect(shouldBadge({ ...base, status: "failed", error: { code: "timeout" } } as CheckUpdate)).toBe(false);
+  });
+});
+
+describe("no-signal caveat strings", () => {
+  const caveat = (locale: string): string =>
+    JSON.parse(readFileSync(`_locales/${locale}/messages.json`, "utf8")).popup_caveat_no_signal.message;
+
+  test("name the missing signal instead of relying on a preceding headline", () => {
+    expect(caveat("en")).toBe("No signal does not mean the image is human-made.");
+    expect(caveat("fi")).toMatch(/^Tekoälyn merkin puuttuminen/);
+  });
+});
