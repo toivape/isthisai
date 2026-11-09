@@ -172,6 +172,12 @@ async function measureIframe(tabId: number, frameId: number, frameUrl: string | 
 //   upload: POST a 40 MiB body that takes ~42 s to send; headers of the
 //     response only arrive when the server has read it all.
 
+// Q4 is only valid with worker DevTools closed (an attached DevTools keeps the
+// worker alive), so results are also POSTed to the spike server's log.
+function report(text: string): void {
+  void fetch(SPIKE_ORIGIN + "/report", { method: "POST", body: text, credentials: "omit" }).catch(() => undefined);
+}
+
 async function measureSurvival(phase: SurvivalPhase): Promise<void> {
   const url =
     SPIKE_ORIGIN +
@@ -180,6 +186,7 @@ async function measureSurvival(phase: SurvivalPhase): Promise<void> {
   let headersAt: number | undefined;
   let bytes = 0;
   let completed = false;
+  report(`[spike:30s] START phase=${phase}`);
   try {
     if (phase === "upload") {
       const res = await fetch(url, {
@@ -207,6 +214,14 @@ async function measureSurvival(phase: SurvivalPhase): Promise<void> {
       }
       completed = true;
     }
+    report(
+      headerBlock(phase, {
+        ms: performance.now() - t0,
+        bytes,
+        headersMs: headersAt === undefined ? undefined : headersAt - t0,
+        completed,
+      }),
+    );
     log(
       headerBlock(phase, {
         ms: performance.now() - t0,
@@ -216,6 +231,14 @@ async function measureSurvival(phase: SurvivalPhase): Promise<void> {
       }),
     );
   } catch (e) {
+    report(
+      headerBlock(phase, {
+        ms: performance.now() - t0,
+        bytes,
+        headersMs: headersAt === undefined ? undefined : headersAt - t0,
+        completed,
+      }),
+    );
     log(
       headerBlock(phase, {
         ms: performance.now() - t0,
@@ -235,18 +258,33 @@ async function measureSurvival(phase: SurvivalPhase): Promise<void> {
 
 // ---- Q5: setAccessLevel + content-script storage.local read ------------------
 
-async function measureStorageAccess(tabId: number, frameId: number): Promise<void> {
+type StorageProbeReply = { ok: boolean; localGet?: string; error?: string };
+
+async function probeStorage(
+  tabId: number,
+  frameId: number,
+  accessLevel: "TRUSTED_CONTEXTS" | "TRUSTED_AND_UNTRUSTED_CONTEXTS",
+): Promise<{ accessOk: boolean; reply: StorageProbeReply | undefined }> {
   const accessOk = await chrome.storage.local
-    .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
+    .setAccessLevel({ accessLevel })
     .then(() => true)
     .catch(() => false);
   await chrome.storage.local.set({ spikeCanary: "worker-written" });
-  const reply = await askFrame<{ ok: boolean; localGet?: string }>(tabId, frameId, {
-    type: "spikeStorageProbe",
-  });
-  const contentRead = reply?.localGet;
-  log(verdictLine({ accessOk, contentRead: contentRead !== undefined }));
-  log(`  content-script storage.local.get(spikeCanary) -> ${JSON.stringify(contentRead)}`);
+  const reply = await askFrame<StorageProbeReply>(tabId, frameId, { type: "spikeStorageProbe" });
+  return { accessOk, reply };
+}
+
+async function measureStorageAccess(tabId: number, frameId: number): Promise<void> {
+  // Control: with untrusted contexts allowed the probe must read the canary;
+  // otherwise an undefined below could just mean "no reply".
+  const control = await probeStorage(tabId, frameId, "TRUSTED_AND_UNTRUSTED_CONTEXTS");
+  log(
+    `[spike:access-control] level=TRUSTED_AND_UNTRUSTED_CONTEXTS setAccessLevel=${control.accessOk ? "ok" : "FAILED"} reply=${JSON.stringify(control.reply)}`,
+  );
+  const restricted = await probeStorage(tabId, frameId, "TRUSTED_CONTEXTS");
+  const contentRead = restricted.reply?.localGet;
+  log(verdictLine({ accessOk: restricted.accessOk, contentRead: contentRead !== undefined }));
+  log(`  restricted reply=${JSON.stringify(restricted.reply)}`);
 }
 
 // ---- Q6: what srcUrl really is -------------------------------------------------

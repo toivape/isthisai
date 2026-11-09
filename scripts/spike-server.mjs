@@ -131,6 +131,14 @@ async function handle(req, res) {
       res.end(`bytes=${TOTAL_BYTES}`);
       return;
     }
+    if (req.method === "POST" && url === "/report") {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      console.log(`[spike-server] REPORT ${new Date().toISOString()} ${body}`);
+      res.writeHead(200, { ...CORS, "Content-Type": "text/plain" });
+      res.end("ok");
+      return;
+    }
     if (req.method === "GET" && (url === "/" || url === "/iframe-site.html")) {
       res.writeHead(200, { ...CORS, "Content-Type": "text/html; charset=utf-8" });
       res.end(IFRAME_SITE_HTML);
