@@ -44,7 +44,7 @@ async function openResultWindow(): Promise<void> {
     width: 420,
     height: 320,
   });
-  if (created.id !== undefined) await chrome.storage.session.set({ [RESULT_WINDOW_KEY]: created.id });
+  if (created?.id !== undefined) await chrome.storage.session.set({ [RESULT_WINDOW_KEY]: created.id });
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
