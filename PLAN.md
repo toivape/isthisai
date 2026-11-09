@@ -426,7 +426,7 @@ Not an AI signal (show details in the popup, no TÄ):
 
 ## 10. Open questions to resolve during implementation
 
-1. M0 spike results (section 9, M0).
+1. ~~M0 spike results (section 9, M0).~~ **Done 2026-11-09:** results in section 2 ("Measured in Brave"); `blob:`/`data:` images were not measured.
 2. Exact pricing and default rate limits of the Content Provenance API (check the OpenAI pricing page; not stated in the guide). Update the confirmation and test-key text accordingly.
 3. Does the OpenAI SynthID check also detect Google/other partner watermarks via this API? The docs only promise "supported OpenAI signals", so assume no and say so in the UI.
 4. Final Finnish label from the EU Code of Practice icon annex.
