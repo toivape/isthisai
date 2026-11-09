@@ -4,6 +4,7 @@ import {
   isCheckResult,
   isCheckUpdate,
   isConfirmUpload,
+  isDismissPopup,
   isKeyStatus,
   isKeyStatusReply,
   isOpenAiAvailability,
@@ -97,6 +98,12 @@ interface GuardCase {
 }
 
 const guardCases: GuardCase[] = [
+  {
+    name: "isDismissPopup",
+    guard: isDismissPopup,
+    valid: [{ type: "dismissPopup" }],
+    invalid: [...notObjects, { type: "checkUpdate" }, { type: "dismissPopups" }],
+  },
   {
     name: "isCheckUpdate",
     guard: isCheckUpdate,

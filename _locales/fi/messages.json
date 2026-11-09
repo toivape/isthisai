@@ -29,31 +29,22 @@
   "confirm_cancel_button": {
     "message": "Peruuta"
   },
-  "spike_menu_srcurl": {
-    "message": "SPIKE srcUrl: kirjaa tämä kuva (Q6)"
+  "menu_check_ai_signals": {
+    "message": "Tarkista tekoälyn merkit"
   },
-  "spike_menu_msg60": {
-    "message": "SPIKE 60 MiB viesti (Q1)"
+  "popup_headline_checking": {
+    "message": "Tarkistetaan tekoälyn merkkejä…"
   },
-  "spike_menu_perm_check": {
-    "message": "SPIKE käyttöoikeudet: vain tarkistus (Q2)"
+  "popup_headline_ai_signal": {
+    "message": "Tekoälyn merkki löytyi"
   },
-  "spike_menu_perm_request": {
-    "message": "SPIKE käyttöoikeudet: pyydä <all_urls> (Q2)"
+  "popup_caveat_no_signal": {
+    "message": "Tekoälyn merkin puuttuminen ei todista, että kuva on ihmisen tekemä."
   },
-  "spike_menu_iframe": {
-    "message": "SPIKE injektoi tähän kehykseen (Q3)"
+  "badge_tooltip": {
+    "message": "Tekoäly"
   },
-  "spike_menu_slow_headers": {
-    "message": "SPIKE 30 s: lataus, otsakkeet myöhässä (Q4)"
-  },
-  "spike_menu_slow_body": {
-    "message": "SPIKE 30 s: lataus, hidas runko (Q4)"
-  },
-  "spike_menu_slow_upload": {
-    "message": "SPIKE 30 s: 40 MiB hidas lähetys (Q4)"
-  },
-  "spike_menu_storage": {
-    "message": "SPIKE tallennustilan käyttötaso (Q5)"
+  "confirm_title_result": {
+    "message": "Onko tämä tekoäly? – Tulos"
   }
 }

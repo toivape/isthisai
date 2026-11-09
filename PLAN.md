@@ -70,6 +70,25 @@ Work through the milestones in order. Each has acceptance criteria; do not start
   - A service worker is stopped when "a `fetch()` response takes more than 30 seconds to arrive", when a single event or API call takes over 5 minutes, or after 30 s of inactivity.
   - `chrome.storage.local` is exposed to content scripts by default; `storage.local.setAccessLevel()` can restrict it to trusted contexts. `storage.session` is not exposed to content scripts, has a 10 MB quota and is cleared on browser restart and extension reload/update.
   - Web pages cannot message the extension unless `externally_connectable` is declared (it is not).
+- **Measured in Brave (M0 spike #3, run by the owner 2026-11-09; Brave 1.99.55, Chromium 157.0.8103.39, arm64).** Spike code was throwaway and is not merged; it is in the history of PR #24.
+  - **Message size:** a 60 MiB base64 string (62,914,560 characters) came back as a `tabs.sendMessage` reply in 134 ms with the content intact. The 64 MiB ceiling itself was not tested.
+  - **`permissions.request` in `contextMenus.onClicked`:** works and shows the Brave prompt. Denying resolves `false` (no throw); allowing resolves `true` and `contains` then reports it. Run as its own click, with no `await` before the call; whether an earlier `await` drops the user gesture was not measured.
+  - **`permissions.contains` does not reflect `activeTab`:** on a context-menu click with `activeTab` only, `contains` for the tab's own origin and for `<all_urls>` both returned `false`.
+  - **Injection with `activeTab` only:** the main frame works. A cross-origin iframe is refused: `Cannot access contents of the page. Extension manifest must request permission to access the respective host.` With `<all_urls>` granted (the owner's confirmation; both states were logged), the same iframe was injected and the content script replied. A same-origin frame was not measured separately.
+  - **Worker lifetime (valid only with the worker DevTools closed; an attached DevTools keeps the worker alive and all three runs completed in 35-39 s):** a 40 MiB download with headers delayed 35 s, a 40 MiB download with headers at once and the body at ~1 MB/s (~42 s), and a 40 MiB upload at ~1 MB/s (~42 s) all failed to finish. The worker never reported completion, and the server saw the upload connection reset (`ECONNRESET`). The worker being stopped was inferred from the missing report; it was not confirmed in `brave://extensions`. A fetch that runs past ~30 s is lost, whether the delay is in the headers, the body or the upload.
+  - **`setAccessLevel(TRUSTED_CONTEXTS)` on `storage.local` works:** with `TRUSTED_AND_UNTRUSTED_CONTEXTS` the content script read the worker's value; with `TRUSTED_CONTEXTS` the read was rejected with `Access to storage is not allowed from this context.`
+  - **What `srcUrl` is (4 images; fetch with `credentials: "omit"`, `activeTab` only):**
+
+    | Image | Page vs image host | `srcUrl` = `currentSrc` | Worker fetch |
+    |---|---|---|---|
+    | Webshop product (CDN-resized URL) | same origin | yes | 200, 117 KiB |
+    | Members-area photo | different host; host sends CORS `*` | yes | 200, 146 KiB |
+    | Wikipedia thumbnail (`960px-…`, `thumb.wikimedia.org`) | different host | yes | 200, 210 KiB |
+    | Reddit feed preview (`preview.redd.it`) | different host, no CORS header | yes | **fails**: `blocked by CORS policy: No 'Access-Control-Allow-Origin' header` (`TypeError: Failed to fetch`) |
+
+    - `srcUrl` is the image the page displays, usually a resized CDN derivative, not the original. Decoded size does not follow the URL's width parameter (Reddit: `width=1080` in the URL, 750x1220 decoded).
+    - With `activeTab` only, a worker fetch of an image on another host works only if that host sends permissive CORS headers. `optional_host_permissions` is the planned answer (section 3).
+    - Not measured: `blob:` and `data:` images, a click where the menu item does not appear (overlay or CSS background), `srcset` with `currentSrc` different from `src`, and an image that needs the user's cookies (the members-area image was served without them).
 
 ---
 
@@ -289,6 +308,8 @@ Not an AI signal (show details in the popup, no TÄ):
 
 **Finding the element for a URL:** the content script is injected after the click, so it cannot know which element was right-clicked. It looks in its frame for `<img>` elements whose `currentSrc` or `src` matches `srcUrl` and badges all of them. If none match (CSS background images, `<picture>` edge cases), show the popup in a fixed corner of the viewport and skip the badge.
 
+**Cross-origin iframes (decided 2026-11-09):** with `activeTab` only, a menu click on an image in a cross-origin iframe falls back to the extension result window (observed in Brave in M1 manual testing; the injection error text was not captured). Accepted as the behaviour: no extra host permissions. From M2 the result window must show the full result, not only the popup content. Same-origin iframes and the top frame get the in-page popup. Repeated fallback clicks focus the one existing window.
+
 **Badge persistence:** keep badges only for the life of the page (a `WeakMap` of element to result inside the injected script). Do not store browsing history.
 
 ---
@@ -346,6 +367,13 @@ Not an AI signal (show details in the popup, no TÄ):
 10. OpenAI upload always opens the confirmation window; Cancel uploads nothing.
 11. AVIF image from a CDN: OpenAI check uses the server-converted version and the popup says so.
 12. Halloween re-saved JPEG: local checks find nothing; the OpenAI check finds SynthID and shows TÄ.
+13. M1: popup closes on Esc and on a click outside it (in a normal page and in an iframe).
+14. From M2 (M1 never badges, the worker only sends `checking`): the TÄ badge follows its image on scroll and resize, and is hidden while the image is outside the viewport.
+15. M1: after `chrome://extensions` → reload extension, a menu click on an already-open page still injects and shows the checking popup (no stale state).
+16. M1: the placeholder result view in the extension window (`?view=result`) renders headline and caveat in both UI languages.
+17. M1: a page script dispatching synthetic click, mousedown or Escape events does not open or close the popup; a page rule like `div { transform: translateZ(0) }` does not displace the popup.
+18. M1: check an image in the main frame, then one in an iframe (and the reverse): only the newest popup stays.
+19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
 
 ---
 
@@ -360,6 +388,7 @@ Not an AI signal (show details in the popup, no TÄ):
   4. Injection into a cross-origin iframe's `frameId` with only `activeTab`: works or fails.
   5. Worker survival: a 40 MiB download and a 40 MiB upload over a throttled connection (DevTools network throttling) taking over 30 s: does the worker survive? Does `setAccessLevel` work on `storage.local`?
   6. What `srcUrl` really is: right-click about 10 images on real sites (social feeds with thumbnails, lazy-loaded pages, `srcset`/`<picture>`, a login-only image). For each, record `srcUrl`, the element's `currentSrc` and natural size, whether it is a thumbnail of a larger original, and whether the worker can fetch it with `credentials: "omit"`.
+  - **Items 2-6 done 2026-11-09:** results in section 2 under "Measured in Brave" (item 6 covers 4 images, no `blob:` case).
 - Accept: extension loads; `npm run build` and `npm test` run; the spike results are recorded in section 2 and the plan is adjusted.
 
 **Thin end-to-end path first.** M1 and M2 together deliver one working path on a real page (right-click → fetch → C2PA → verdict → TÄ or "No AI signal found" in the placeholder popup) before the rest is built around it.

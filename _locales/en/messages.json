@@ -29,31 +29,22 @@
   "confirm_cancel_button": {
     "message": "Cancel"
   },
-  "spike_menu_srcurl": {
-    "message": "SPIKE srcUrl: log this image (Q6)"
+  "menu_check_ai_signals": {
+    "message": "Check for AI signals"
   },
-  "spike_menu_msg60": {
-    "message": "SPIKE 60 MiB message (Q1)"
+  "popup_headline_checking": {
+    "message": "Checking for AI signals…"
   },
-  "spike_menu_perm_check": {
-    "message": "SPIKE permissions: check only (Q2)"
+  "popup_headline_ai_signal": {
+    "message": "AI signal found"
   },
-  "spike_menu_perm_request": {
-    "message": "SPIKE permissions: request <all_urls> (Q2)"
+  "popup_caveat_no_signal": {
+    "message": "No signal does not mean the image is human-made."
   },
-  "spike_menu_iframe": {
-    "message": "SPIKE inject into this frame (Q3)"
+  "badge_tooltip": {
+    "message": "AI signal found (tekoäly)"
   },
-  "spike_menu_slow_headers": {
-    "message": "SPIKE 30s: download, headers late (Q4)"
-  },
-  "spike_menu_slow_body": {
-    "message": "SPIKE 30s: download, body slow (Q4)"
-  },
-  "spike_menu_slow_upload": {
-    "message": "SPIKE 30s: upload 40 MiB slow (Q4)"
-  },
-  "spike_menu_storage": {
-    "message": "SPIKE storage access level (Q5)"
+  "confirm_title_result": {
+    "message": "Is this AI? – Result"
   }
 }

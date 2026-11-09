@@ -1,105 +1,166 @@
-// M0 spike #3: content-script side. Injected by the worker on demand, never
-// declared in the manifest. THROWAWAY CODE, removed before merge.
-//
-// The content build is a separate self-contained IIFE (vite.content.config.ts)
-// that cannot import from src/background, so shared helpers are duplicated.
+// Content-script shell. One host element on document.documentElement with a
+// closed Shadow DOM holds all injected UI (hard rule: no page-DOM changes
+// beyond that host, and no style leaking in either direction). UI only —
+// no key access, no network. Injected only after a menu click, never via a
+// manifest content_scripts entry (hard rule 1).
 
-export {}; // module (required for the Window augmentation below)
+import { isBadgeVisible, shouldBadge } from "./badge";
+import { findImages } from "./findImages";
+import { installOnce } from "./installOnce";
+import { message } from "../shared/i18n";
+import { isCheckUpdate, isDismissPopup } from "../shared/types";
 
-declare global {
-  interface Window {
-    __isthisaiSpikeLoaded?: boolean;
-  }
+// The idempotently-installed UI instance; the shape is local to the shell.
+export interface ContentShell {
+  handleCheckUpdate(update: unknown): void;
 }
 
-// Idempotent: executeScript may run this file again on another click in the
-// same frame. The first execution's listener keeps serving messages; a
-// second listener would only duplicate work (60 MiB payloads built twice).
-if (!window.__isthisaiSpikeLoaded) {
-  window.__isthisaiSpikeLoaded = true;
-
-  interface SpikeMessage {
-    type?: unknown;
-    bytes?: unknown;
-    srcUrl?: unknown;
+const INSTANCE_KEY = "isthisai.contentShell";
+// Inline !important beats page rules like `div { transform: … }`, which would
+// otherwise turn the host into the containing block of the fixed children.
+const HOST_RESET: ReadonlyArray<readonly [string, string]> = [
+  ["all", "initial"],
+  ["display", "block"],
+  ["position", "static"],
+  ["transform", "none"],
+  ["filter", "none"],
+  ["perspective", "none"],
+  ["contain", "none"],
+  ["will-change", "auto"],
+];
+const BASE_STYLE = `
+  :host { all: initial; }
+  .isthisai-badge {
+    position: fixed; z-index: 2147483647;
+    background: #7c3aed; color: #fff;
+    font: 700 12px/1 system-ui, sans-serif;
+    padding: 3px 5px; border-radius: 4px; cursor: pointer;
   }
-
-  function checksum(s: string): string {
-    let sum = 0;
-    for (let i = 0; i < s.length; i += 4099) sum = (sum + s.charCodeAt(i)) * 31 + 1;
-    return `${sum}:${s.length}`;
+  .isthisai-popup {
+    position: fixed; z-index: 2147483647;
+    right: 16px; top: 16px; max-width: 320px;
+    background: #fff; color: #111; border: 1px solid #ccc;
+    border-radius: 8px; padding: 12px 16px;
+    font: 13px/1.4 system-ui, sans-serif;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   }
+  .isthisai-popup h1 { font-size: 14px; margin: 0 0 4px; }
+  .isthisai-popup p { margin: 0; }`;
 
-  function buildPayload(bytes: number): string {
-    const chunk = "A".repeat(64 * 1024);
-    const parts: string[] = [];
-    let remaining = bytes;
-    while (remaining > 0) {
-      const take = Math.min(chunk.length, remaining);
-      parts.push(chunk.slice(0, take));
-      remaining -= take;
-    }
-    return parts.join("");
-  }
-
-  chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
-    const msg = message as SpikeMessage;
-    switch (msg?.type) {
-      case "spikePing":
-        sendResponse({ ok: true, where: "content-script", url: location.href });
-        return false;
-      case "spikeEcho": {
-        const bytes = typeof msg.bytes === "number" ? msg.bytes : 0;
-        const t0 = performance.now();
-        try {
-          const base64 = buildPayload(bytes);
-          sendResponse({
-            ok: true,
-            base64,
-            checksum: checksum(base64),
-            buildMs: Math.round(performance.now() - t0),
-          });
-        } catch (e) {
-          sendResponse({ ok: false, error: String(e) });
-        }
-        return false;
-      }
-      case "spikeStorageProbe": {
-        // Q5: can a content script still read storage.local after
-        // setAccessLevel(TRUSTED_CONTEXTS)?
-        chrome.storage.local
-          .get("spikeCanary")
-          .then((items) => sendResponse({ ok: true, localGet: (items as Record<string, unknown>).spikeCanary }))
-          .catch((e: unknown) => sendResponse({ ok: false, error: String(e) }));
-        return true; // async response
-      }
-      case "spikeElementInfo": {
-        // Q6: find the element the menu click referred to and report reality.
-        const srcUrl = typeof msg.srcUrl === "string" ? msg.srcUrl : "";
-        let found: Record<string, unknown> | undefined;
-        for (const img of document.images) {
-          if (img.currentSrc === srcUrl || img.src === srcUrl) {
-            found = {
-              tag: "img",
-              currentSrc: img.currentSrc || img.src || "",
-              src: img.src,
-              width: img.naturalWidth,
-              height: img.naturalHeight,
-              srcset: img.srcset || undefined,
-              sizes: img.sizes || undefined,
-              loading: img.loading,
-            };
-            break;
-          }
-        }
-        if (!found && document.querySelector(`[style*="${CSS.escape(srcUrl)}"]`)) {
-          found = { tag: "css-background", currentSrc: srcUrl, note: "matched via inline style" };
-        }
-        sendResponse(found ?? { tag: "none", currentSrc: "", note: "no img element matched" });
-        return false;
-      }
-      default:
-        return false;
-    }
-  });
+interface PopupHandle {
+  close(): void;
 }
+
+function createShell(): ContentShell {
+  const host = document.createElement("div");
+  for (const [property, value] of HOST_RESET) host.style.setProperty(property, value, "important");
+  const shadow = host.attachShadow({ mode: "closed" });
+  const style = document.createElement("style");
+  style.textContent = BASE_STYLE;
+  shadow.appendChild(style);
+  document.documentElement.appendChild(host);
+
+  let popup: PopupHandle | undefined;
+  const badges = new Map<HTMLImageElement, HTMLDivElement>();
+
+  function closePopup(): void {
+    popup?.close();
+    popup = undefined;
+  }
+
+  function showPopup(headlineKey: string, caveatKey?: string): PopupHandle {
+    const overlay = document.createElement("div");
+    overlay.className = "isthisai-popup";
+    const headline = document.createElement("h1");
+    headline.textContent = message(headlineKey);
+    overlay.appendChild(headline);
+    if (caveatKey) {
+      const caveat = document.createElement("p");
+      caveat.textContent = message(caveatKey);
+      overlay.appendChild(caveat);
+    }
+    shadow.appendChild(overlay);
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!event.isTrusted) return;
+      if (event.key === "Escape") close();
+    };
+    // A closed shadow root retargets its events to the host, so any click
+    // whose target is not the host is an outside click.
+    const onOutside = (event: MouseEvent): void => {
+      if (!event.isTrusted) return;
+      if (event.target !== host) close();
+    };
+    const close = (): void => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("mousedown", onOutside, true);
+      overlay.remove();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("mousedown", onOutside, true);
+    return { close };
+  }
+
+  function positionBadge(badge: HTMLDivElement, img: HTMLImageElement): void {
+    const rect = img.getBoundingClientRect();
+    const viewport = { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight };
+    badge.style.display = isBadgeVisible(rect, viewport, img.isConnected) ? "" : "none";
+    badge.style.top = `${Math.max(4, rect.top + 4)}px`;
+    badge.style.left = `${Math.max(4, rect.right - badge.offsetWidth - 4)}px`;
+  }
+
+  function repositionBadges(): void {
+    for (const [img, badge] of badges) {
+      if (!img.isConnected) {
+        badge.remove();
+        badges.delete(img);
+      } else {
+        positionBadge(badge, img);
+      }
+    }
+  }
+
+  // Badges use fixed positioning; keep them on their images while the page
+  // scrolls (any scrollable element) or the window resizes.
+  window.addEventListener("scroll", repositionBadges, { capture: true });
+  window.addEventListener("resize", repositionBadges);
+
+  function addBadge(img: HTMLImageElement): void {
+    if (badges.has(img)) return;
+    const badge = document.createElement("div");
+    badge.className = "isthisai-badge";
+    badge.textContent = "TÄ";
+    badge.title = message("badge_tooltip");
+    badge.addEventListener("click", (event) => {
+      if (!event.isTrusted) return;
+      closePopup();
+      popup = showPopup("popup_headline_ai_signal");
+    });
+    shadow.appendChild(badge);
+    positionBadge(badge, img);
+    badges.set(img, badge);
+  }
+
+  function handleMessage(message: unknown): void {
+    if (isDismissPopup(message)) closePopup();
+    else handleCheckUpdate(message);
+  }
+
+  function handleCheckUpdate(update: unknown): void {
+    if (!isCheckUpdate(update)) return;
+    closePopup();
+    popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
+    if (!shouldBadge(update)) return;
+    for (const img of findImages(update.srcUrl)) {
+      addBadge(img);
+    }
+  }
+
+  // Registered inside the factory so a second injection reuses the whole
+  // instance (including this listener) instead of adding a duplicate.
+  chrome.runtime.onMessage.addListener(handleMessage);
+
+  return { handleCheckUpdate };
+}
+
+void installOnce(INSTANCE_KEY, createShell);
