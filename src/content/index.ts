@@ -8,7 +8,7 @@ import { isBadgeVisible, shouldBadge } from "./badge";
 import { findImages } from "./findImages";
 import { installOnce } from "./installOnce";
 import { message } from "../shared/i18n";
-import { isCheckUpdate } from "../shared/types";
+import { isCheckUpdate, isDismissPopup } from "../shared/types";
 
 // The idempotently-installed UI instance; the shape is local to the shell.
 export interface ContentShell {
@@ -141,6 +141,11 @@ function createShell(): ContentShell {
     badges.set(img, badge);
   }
 
+  function handleMessage(message: unknown): void {
+    if (isDismissPopup(message)) closePopup();
+    else handleCheckUpdate(message);
+  }
+
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
     closePopup();
@@ -153,7 +158,7 @@ function createShell(): ContentShell {
 
   // Registered inside the factory so a second injection reuses the whole
   // instance (including this listener) instead of adding a duplicate.
-  chrome.runtime.onMessage.addListener(handleCheckUpdate);
+  chrome.runtime.onMessage.addListener(handleMessage);
 
   return { handleCheckUpdate };
 }

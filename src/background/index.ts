@@ -3,7 +3,7 @@
 // at any time, so listeners are registered synchronously and no state is
 // kept in module variables.
 
-import type { CheckUpdate } from "../shared/types";
+import type { CheckUpdate, DismissPopup } from "../shared/types";
 
 const MENU_ID = "check-ai-signals";
 
@@ -45,8 +45,11 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     srcUrl,
     status: "checking",
   } satisfies CheckUpdate;
-  void chrome.scripting
-    .executeScript({ target: { tabId, frameIds: [frameId] }, files: ["content/index.js"] })
+  const dismiss = { type: "dismissPopup" } satisfies DismissPopup;
+  void chrome.tabs
+    .sendMessage(tabId, dismiss)
+    .catch(() => undefined) // no frame has the script yet
+    .then(() => chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: ["content/index.js"] }))
     .then(() => chrome.tabs.sendMessage(tabId, update, { frameId }))
     .catch((error: unknown) => {
       console.error("injection failed", error);
