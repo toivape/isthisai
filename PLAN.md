@@ -433,6 +433,7 @@ Not an AI signal (show details in the popup, no TÄ):
 5. Whether to bundle a C2PA trust list in a later version, so local results can show `trusted` and the issuer is verified.
 6. Whether to publish to a store at all (v0.1 is a zip only).
 7. Whether to add other providers' checks later (only if an official public API appears).
+8. Whether the popup should hint that the checked image looks like a resized derivative (CDN thumbnail URL such as `960px-…` or `?width=…`), since resizing usually drops metadata and makes "No AI signal found" weaker. Seen on 3 of 4 spike images (section 2); decide after seeing the M2 popup.
 
 ---
 
