@@ -25,13 +25,26 @@ void chrome.contextMenus.removeAll(() => {
 
 // Restricted frames (chrome://, the Web Store, other extensions' pages)
 // cannot be injected; the result window shows the result there instead.
-function openResultWindow(): void {
-  void chrome.windows.create({
+const RESULT_WINDOW_KEY = "resultWindowId";
+
+async function openResultWindow(): Promise<void> {
+  const stored = await chrome.storage.session.get(RESULT_WINDOW_KEY);
+  const existingId: unknown = stored[RESULT_WINDOW_KEY];
+  if (typeof existingId === "number") {
+    try {
+      await chrome.windows.update(existingId, { focused: true });
+      return;
+    } catch {
+      // window was closed; open a new one
+    }
+  }
+  const created = await chrome.windows.create({
     type: "popup",
     url: "src/confirm/confirm.html?view=result",
     width: 420,
     height: 320,
   });
+  if (created.id !== undefined) await chrome.storage.session.set({ [RESULT_WINDOW_KEY]: created.id });
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -53,6 +66,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     .then(() => chrome.tabs.sendMessage(tabId, update, { frameId }))
     .catch((error: unknown) => {
       console.error("injection failed", error);
-      openResultWindow();
+      void openResultWindow().catch(console.error);
     });
 });

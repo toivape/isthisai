@@ -354,6 +354,7 @@ Not an AI signal (show details in the popup, no TÄ):
 16. M1: the placeholder result view in the extension window (`?view=result`) renders headline and caveat in both UI languages.
 17. M1: a page script dispatching synthetic click, mousedown or Escape events does not open or close the popup; a page rule like `div { transform: translateZ(0) }` does not displace the popup.
 18. M1: check an image in the main frame, then one in an iframe (and the reverse): only the newest popup stays.
+19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
 
 ---
 
