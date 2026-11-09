@@ -289,7 +289,7 @@ Not an AI signal (show details in the popup, no TÄ):
 
 **Finding the element for a URL:** the content script is injected after the click, so it cannot know which element was right-clicked. It looks in its frame for `<img>` elements whose `currentSrc` or `src` matches `srcUrl` and badges all of them. If none match (CSS background images, `<picture>` edge cases), show the popup in a fixed corner of the viewport and skip the badge.
 
-**M1 cross-origin iframe note (2026-11-09):** the spike result for iframe injection with `activeTab` only (issue #3 / PR #24) is still pending. M1 was built to the plan's default path: inject into `info.frameId`; if `executeScript` fails, fall back to the extension result window. If the spike later shows a different requirement, M2+ adjusts it.
+**Cross-origin iframes (decided 2026-11-09):** with `activeTab` only, a menu click on an image in a cross-origin iframe falls back to the extension result window (observed in Brave in M1 manual testing; the injection error text was not captured). Accepted as the behaviour: no extra host permissions. From M2 the result window must show the full result, not only the popup content. Same-origin iframes and the top frame get the in-page popup. Repeated fallback clicks focus the one existing window.
 
 **Badge persistence:** keep badges only for the life of the page (a `WeakMap` of element to result inside the injected script). Do not store browsing history.
 
