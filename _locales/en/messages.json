@@ -28,5 +28,23 @@
   },
   "confirm_cancel_button": {
     "message": "Cancel"
+  },
+  "menu_check_ai_signals": {
+    "message": "Check for AI signals"
+  },
+  "popup_headline_checking": {
+    "message": "Checking for AI signals…"
+  },
+  "popup_headline_ai_signal": {
+    "message": "AI signal found"
+  },
+  "popup_caveat_no_signal": {
+    "message": "No signal does not mean the image is human-made."
+  },
+  "badge_tooltip": {
+    "message": "AI signal found (tekoäly)"
+  },
+  "confirm_title_result": {
+    "message": "Is this AI? – Result"
   }
 }

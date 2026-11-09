@@ -289,6 +289,8 @@ Not an AI signal (show details in the popup, no TÄ):
 
 **Finding the element for a URL:** the content script is injected after the click, so it cannot know which element was right-clicked. It looks in its frame for `<img>` elements whose `currentSrc` or `src` matches `srcUrl` and badges all of them. If none match (CSS background images, `<picture>` edge cases), show the popup in a fixed corner of the viewport and skip the badge.
 
+**Cross-origin iframes (decided 2026-11-09):** with `activeTab` only, a menu click on an image in a cross-origin iframe falls back to the extension result window (observed in Brave in M1 manual testing; the injection error text was not captured). Accepted as the behaviour: no extra host permissions. From M2 the result window must show the full result, not only the popup content. Same-origin iframes and the top frame get the in-page popup. Repeated fallback clicks focus the one existing window.
+
 **Badge persistence:** keep badges only for the life of the page (a `WeakMap` of element to result inside the injected script). Do not store browsing history.
 
 ---
@@ -346,6 +348,13 @@ Not an AI signal (show details in the popup, no TÄ):
 10. OpenAI upload always opens the confirmation window; Cancel uploads nothing.
 11. AVIF image from a CDN: OpenAI check uses the server-converted version and the popup says so.
 12. Halloween re-saved JPEG: local checks find nothing; the OpenAI check finds SynthID and shows TÄ.
+13. M1: popup closes on Esc and on a click outside it (in a normal page and in an iframe).
+14. From M2 (M1 never badges, the worker only sends `checking`): the TÄ badge follows its image on scroll and resize, and is hidden while the image is outside the viewport.
+15. M1: after `chrome://extensions` → reload extension, a menu click on an already-open page still injects and shows the checking popup (no stale state).
+16. M1: the placeholder result view in the extension window (`?view=result`) renders headline and caveat in both UI languages.
+17. M1: a page script dispatching synthetic click, mousedown or Escape events does not open or close the popup; a page rule like `div { transform: translateZ(0) }` does not displace the popup.
+18. M1: check an image in the main frame, then one in an iframe (and the reverse): only the newest popup stays.
+19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
 
 ---
 

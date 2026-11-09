@@ -69,6 +69,9 @@ export type CheckUpdate =
   | { type: "checkUpdate"; checkId: string; srcUrl: string; status: "done"; result: CheckResult; openai: OpenAiAvailability }
   | { type: "checkUpdate"; checkId: string; srcUrl: string; status: "failed"; error: CheckError };
 
+// worker -> every frame of the tab: a new check started elsewhere, close any popup
+export type DismissPopup = { type: "dismissPopup" };
+
 export type OpenAiAvailability = { available: true } | { available: false; reason: "no_key" };
 
 // worker -> content script, request/response
@@ -200,6 +203,10 @@ export function isCheckUpdate(value: unknown): value is CheckUpdate {
     return isCheckError(value.error);
   }
   return false;
+}
+
+export function isDismissPopup(value: unknown): value is DismissPopup {
+  return hasType(value, "dismissPopup");
 }
 
 export function isReadBlob(value: unknown): value is ReadBlob {
