@@ -374,6 +374,8 @@ Not an AI signal (show details in the popup, no TÄ):
 17. M1: a page script dispatching synthetic click, mousedown or Escape events does not open or close the popup; a page rule like `div { transform: translateZ(0) }` does not displace the popup.
 18. M1: check an image in the main frame, then one in an iframe (and the reverse): only the newest popup stays.
 19. M2: right-click a `blob:` image (e.g. canvas `toBlob` → `<img src=blob:…>`) twice in a row on the same page: the first check reads the blob (no `fetch_failed`), and the worker logs one `image collected` line per check (no duplicate reads from stacked listeners).
+20. M2: decline the permission prompt on a cross-origin image: the extension window opens with the localized "access not allowed" text (no content script exists yet). Block or break an image download after injection: the in-page popup shows the localized error instead of "Checking…".
+21. M2: right-click an image inside a cross-origin iframe (including a `data:` image there): the permission prompt appears once, then the in-page popup shows in that frame.
 19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
 
 ---

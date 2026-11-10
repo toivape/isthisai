@@ -29,20 +29,25 @@ void chrome.contextMenus.removeAll(() => {
 // cannot be injected; the result window shows the result there instead.
 const RESULT_WINDOW_KEY = "resultWindowId";
 
-async function openResultWindow(): Promise<void> {
+async function openResultWindow(error?: CheckError): Promise<void> {
   const stored = await chrome.storage.session.get(RESULT_WINDOW_KEY);
   const existingId: unknown = stored[RESULT_WINDOW_KEY];
   if (typeof existingId === "number") {
     try {
-      await chrome.windows.update(existingId, { focused: true });
-      return;
+      if (error) {
+        // An open window cannot be re-pointed at the new error; replace it.
+        await chrome.windows.remove(existingId);
+      } else {
+        await chrome.windows.update(existingId, { focused: true });
+        return;
+      }
     } catch {
       // window was closed; open a new one
     }
   }
   const created = await chrome.windows.create({
     type: "popup",
-    url: "src/confirm/confirm.html?view=result",
+    url: `src/confirm/confirm.html?view=result${error ? `&error=${error.code}` : ""}`,
     width: 420,
     height: 320,
   });
@@ -69,13 +74,23 @@ async function notifyFailed(
   srcUrl: string,
   error: CheckError,
 ): Promise<void> {
-  await chrome.tabs
-    .sendMessage(tabId, { type: "checkUpdate", checkId, srcUrl, status: "failed", error }, { frameId })
-    .catch(() => undefined);
+  const update = { type: "checkUpdate", checkId, srcUrl, status: "failed", error } satisfies CheckUpdate;
+  try {
+    await chrome.tabs.sendMessage(tabId, update, { frameId });
+  } catch {
+    // No content script in the frame (e.g. permission denied before injection).
+    await openResultWindow(error).catch(console.error);
+  }
 }
 
-async function runCheck(input: { tabId: number; frameId: number; srcUrl: string; mainFrameUrl: string }): Promise<void> {
-  const { tabId, frameId, srcUrl, mainFrameUrl } = input;
+async function runCheck(input: {
+  tabId: number;
+  frameId: number;
+  srcUrl: string;
+  mainFrameUrl: string;
+  frameUrl: string;
+}): Promise<void> {
+  const { tabId, frameId, srcUrl, mainFrameUrl, frameUrl } = input;
   const checkId = crypto.randomUUID();
 
   // Host permission first, with no await before it: the user gesture from the
@@ -88,7 +103,7 @@ async function runCheck(input: { tabId: number; frameId: number; srcUrl: string;
   } catch {
     containsAllUrls = false;
   }
-  if (needsPermissionRequest(mainFrameUrl, srcUrl, containsAllUrls)) {
+  if (needsPermissionRequest(mainFrameUrl, frameUrl, srcUrl, containsAllUrls)) {
     const granted = await chrome.permissions.request({ origins: ["<all_urls>"] });
     if (!granted) {
       await notifyFailed(tabId, frameId, checkId, srcUrl, { code: "permission_denied" });
@@ -140,7 +155,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   // The main-frame origin decides whether the image origin is cross-origin;
   // tab.url is the main frame's URL.
   const mainFrameUrl = tab.url ?? "";
-  void runCheck({ tabId, frameId, srcUrl, mainFrameUrl }).catch((error: unknown) => {
+  const frameUrl = info.frameUrl ?? mainFrameUrl;
+  void runCheck({ tabId, frameId, srcUrl, mainFrameUrl, frameUrl }).catch((error: unknown) => {
     console.error("check failed", error);
   });
 });

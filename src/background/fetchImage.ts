@@ -21,23 +21,43 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** data: URL decoder; only base64 payloads of image/* types are supported. */
-export function decodeDataUrl(url: string, maxBytes: number = MAX_IMAGE_BYTES): ImageBytes {
-  const comma = url.indexOf(",");
-  if (!url.startsWith("data:") || comma === -1) {
-    return { kind: "error", error: { code: "unsupported_type" } };
+function percentDecode(text: string): Uint8Array {
+  const out: number[] = [];
+  const encoder = new TextEncoder();
+  for (let at = 0; at < text.length; at++) {
+    const hex = text.charAt(at) === "%" ? text.slice(at + 1, at + 3) : "";
+    if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+      out.push(parseInt(hex, 16));
+      at += 2;
+    } else {
+      out.push(...encoder.encode(String.fromCodePoint(text.codePointAt(at) ?? 0)));
+      if ((text.codePointAt(at) ?? 0) > 0xffff) at++;
+    }
   }
-  const [meta] = url.slice(5, comma).split(";");
-  if (!meta.startsWith("image/")) return { kind: "error", error: { code: "unsupported_type" } };
-  if (!url.slice(5, comma).includes(";base64")) {
-    return { kind: "error", error: { code: "unsupported_type" } };
+  return Uint8Array.from(out);
+}
+
+/** data: URL decoder for image/* payloads, base64 or percent-encoded. */
+export function decodeDataUrl(url: string, maxBytes: number = MAX_IMAGE_BYTES): ImageBytes {
+  const unsupported: ImageBytes = { kind: "error", error: { code: "unsupported_type" } };
+  const comma = url.indexOf(",");
+  if (!url.startsWith("data:") || comma === -1) return unsupported;
+  const [meta, ...params] = url.slice(5, comma).split(";");
+  if (!meta.toLowerCase().startsWith("image/")) return unsupported;
+  const isBase64 = params.some((param) => param.trim().toLowerCase() === "base64");
+  const payload = url.slice(comma + 1);
+  // Length bound before any decoding: base64 yields <= 3/4 byte per char,
+  // percent-encoding <= 1 byte per char.
+  if ((isBase64 ? Math.floor((payload.length * 3) / 4) : payload.length) > maxBytes) {
+    return { kind: "error", error: { code: "too_large" } };
   }
   try {
-    const bytes = decodeBase64(url.slice(comma + 1));
+    const raw = percentDecode(payload);
+    const bytes = isBase64 ? decodeBase64(String.fromCharCode(...raw)) : raw;
     if (bytes.length > maxBytes) return { kind: "error", error: { code: "too_large" } };
     return { kind: "bytes", bytes, mediaType: meta };
   } catch {
-    return { kind: "error", error: { code: "unsupported_type" } };
+    return unsupported;
   }
 }
 

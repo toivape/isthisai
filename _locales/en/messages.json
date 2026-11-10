@@ -46,5 +46,20 @@
   },
   "confirm_title_result": {
     "message": "Is this AI? – Result"
+  },
+  "error_permission_denied": {
+    "message": "Access to the image was not allowed."
+  },
+  "error_fetch_failed": {
+    "message": "The image could not be downloaded."
+  },
+  "error_timeout": {
+    "message": "Downloading the image took too long."
+  },
+  "error_too_large": {
+    "message": "The image is too large to check."
+  },
+  "error_unsupported_type": {
+    "message": "This image type is not supported."
   }
 }

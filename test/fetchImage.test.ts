@@ -88,6 +88,33 @@ describe("decodeDataUrl", () => {
     expect(result.mediaType).toBe("image/png");
   });
 
+  test("decodes a percent-encoded (non-base64) data URL", () => {
+    const png = minimalPng();
+    const escaped = [...png].map((b) => `%${b.toString(16).padStart(2, "0")}`).join("");
+    const result = decodeDataUrl(`data:image/png,${escaped}`);
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") return;
+    expect([...result.bytes]).toEqual([...png]);
+    expect(result.mediaType).toBe("image/png");
+  });
+
+  test("decodes a base64 payload that carries percent escapes", () => {
+    const png = minimalPng();
+    const escaped = [...encodeBase64(png)].map((c) => `%${c.charCodeAt(0).toString(16)}`).join("");
+    const result = decodeDataUrl(`data:image/png;base64,${escaped}`);
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") return;
+    expect([...result.bytes]).toEqual([...png]);
+  });
+
+  test("rejects an oversized payload by length before decoding", () => {
+    expect(decodeDataUrl(`data:image/png,${"a".repeat(2000)}`, 1000)).toEqual({ kind: "error", error: { code: "too_large" } });
+    expect(decodeDataUrl(`data:image/png;base64,${"A".repeat(2000)}`, 1000)).toEqual({
+      kind: "error",
+      error: { code: "too_large" },
+    });
+  });
+
   test("non-image and malformed data URLs give unsupported_type", () => {
     expect(decodeDataUrl("data:text/plain;base64,aGk=")).toEqual({ kind: "error", error: { code: "unsupported_type" } });
     expect(decodeDataUrl("data:image/png;base64,!!!")).toEqual({ kind: "error", error: { code: "unsupported_type" } });
@@ -113,10 +140,24 @@ describe("originsToCheck / needsPermissionRequest", () => {
   });
 
   test("needsPermissionRequest follows the plan rule", () => {
-    expect(needsPermissionRequest("https://page.example/", "https://page.example/i.png", false)).toBe(false);
-    expect(needsPermissionRequest("https://page.example/", "https://cdn.example/i.png", true)).toBe(false);
-    expect(needsPermissionRequest("https://page.example/", "https://cdn.example/i.png", false)).toBe(true);
-    expect(needsPermissionRequest("https://page.example/", "data:image/png;base64,AAA", false)).toBe(false);
+    const main = "https://page.example/";
+    expect(needsPermissionRequest(main, main, "https://page.example/i.png", false)).toBe(false);
+    expect(needsPermissionRequest(main, main, "https://cdn.example/i.png", true)).toBe(false);
+    expect(needsPermissionRequest(main, main, "https://cdn.example/i.png", false)).toBe(true);
+    expect(needsPermissionRequest(main, main, "data:image/png;base64,AAA", false)).toBe(false);
+  });
+
+  test("a cross-origin frame needs the permission whatever the image url is", () => {
+    const main = "https://page.example/";
+    const frame = "https://embed.example/f.html";
+    expect(needsPermissionRequest(main, frame, "data:image/png;base64,AAA", false)).toBe(true);
+    expect(needsPermissionRequest(main, frame, "blob:https://embed.example/uuid", false)).toBe(true);
+    expect(needsPermissionRequest(main, frame, "https://page.example/i.png", false)).toBe(true);
+    expect(needsPermissionRequest(main, frame, "https://embed.example/i.png", true)).toBe(false);
+  });
+
+  test("a frame without an http(s) origin does not trigger the prompt", () => {
+    expect(needsPermissionRequest("https://page.example/", "about:blank", "data:image/png;base64,AAA", false)).toBe(false);
   });
 });
 

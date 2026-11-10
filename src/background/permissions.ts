@@ -32,11 +32,18 @@ export function originsToCheck(frameUrl: string, srcUrl: string): string[] {
   return [...origins];
 }
 
-/** True when the <all_urls> prompt must be shown before fetching. */
-export function needsPermissionRequest(mainFrameUrl: string, srcUrl: string, containsAllUrls: boolean): boolean {
+/**
+ * True when the <all_urls> prompt must be shown before injecting and fetching:
+ * the clicked frame's origin (injection) or the image's origin (fetch) differs
+ * from the main-frame origin that activeTab covers.
+ */
+export function needsPermissionRequest(
+  mainFrameUrl: string,
+  frameUrl: string,
+  srcUrl: string,
+  containsAllUrls: boolean,
+): boolean {
   if (containsAllUrls) return false;
   const main = urlOriginPattern(mainFrameUrl);
-  const image = urlOriginPattern(srcUrl);
-  if (!image) return false; // data:/blob: or same-scheme-less cases
-  return image !== main;
+  return originsToCheck(frameUrl, srcUrl).some((origin) => origin !== main);
 }

@@ -8,6 +8,7 @@ import { isBadgeVisible, shouldBadge } from "./badge";
 import { findImages } from "./findImages";
 import { installOnce } from "./installOnce";
 import { readBlobInPage } from "./readBlob";
+import { errorMessageKey } from "../shared/errors";
 import { message } from "../shared/i18n";
 import { isCheckUpdate, isDismissPopup, isReadBlob } from "../shared/types";
 import type { ReadBlobReply } from "../shared/types";
@@ -151,6 +152,10 @@ function createShell(): ContentShell {
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
     closePopup();
+    if (update.status === "failed") {
+      popup = showPopup(errorMessageKey(update.error.code));
+      return;
+    }
     popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
     if (!shouldBadge(update)) return;
     for (const img of findImages(update.srcUrl)) {
