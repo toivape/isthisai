@@ -1,19 +1,19 @@
 import { readFileSync } from "node:fs";
-import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi, type MockInstance } from "vitest";
 import { readC2pa, mapC2paError, mapC2paStore } from "../src/background/c2pa";
 import type { LocalC2pa } from "../src/shared/types";
 import { minimalGif, minimalWebp, pngWithXmpProvenance } from "./helpers/images";
 
-const CTX_GATE = '{"verify":{"remote_manifest_fetch":false,"ocsp_fetch":false}}';
 const WASM_BYTES = readFileSync("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm");
 
 // Tests init the wasm from raw bytes, so the glue never calls fetch: any fetch
 // at all — including the wasm URL — means the remote-fetch gate failed.
-let fetchSpy: ReturnType<typeof vi.spyOn>;
+let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
 beforeAll(async () => {
   fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-    throw new Error(`test forbids fetch: ${String(input)}`);
+    const target = input instanceof Request ? input.url : String(input);
+    throw new Error(`test forbids fetch: ${target}`);
   });
 });
 

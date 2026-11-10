@@ -8,6 +8,7 @@ Update this list after M0 if the scripts change.
 - `npm run dev` : watch build into `dist/`
 - `npm run build` : production build into `dist/`
 - `npm run typecheck` : `tsc --noEmit`
+- `npm run lint` : ESLint (type-aware). Uses the TS 6 API via the `@typescript/typescript6` alias while `tsc` stays on 7.
 - `npm test` : Vitest unit tests (all network mocked)
 - `npm run test:live` : opt-in; reads `OPENAI_API_KEY` from the environment and checks the fixtures in `test/fixtures/`
 

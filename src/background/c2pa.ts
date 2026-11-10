@@ -52,7 +52,7 @@ function actionsOf(manifest: Record<string, unknown>): ActionLike[] {
     const data = assertion.data;
     // c2pa.actions and c2pa.actions.v2 both carry { actions: [...] }
     if (!Array.isArray(data.actions)) return [];
-    return data.actions.filter(isObject) as ActionLike[];
+    return data.actions.filter(isObject);
   });
 }
 

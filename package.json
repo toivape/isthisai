@@ -7,13 +7,17 @@
     "dev": "node scripts/dev.mjs",
     "build": "vite build && vite build --config vite.content.config.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.7",
     "@types/node": "^26.6.6",
-    "typescript": "^7.0.2",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "eslint": "^10.14.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-eslint": "^8.72.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
