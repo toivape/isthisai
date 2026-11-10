@@ -113,6 +113,14 @@ export interface CheckRecord {
   size: number;
 }
 
+export function isCheckRecord(value: unknown): value is CheckRecord {
+  if (!isObject(value)) return false;
+  if (!hasString(value, "checkId") || !hasString(value, "srcUrl") || !hasString(value, "frameUrl")) return false;
+  if (!hasString(value, "imageHash") || !hasString(value, "mediaType")) return false;
+  if (typeof value.tabId !== "number" || typeof value.frameId !== "number" || typeof value.size !== "number") return false;
+  return true;
+}
+
 export const CHECK_KEY_PREFIX = "check:";
 export const RESULT_KEY_PREFIX = "result:";
 

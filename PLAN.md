@@ -381,6 +381,7 @@ Not an AI signal (show details in the popup, no TÄ):
 24. M2: start a check on a slow image, then check another: the first result never replaces the second popup.
 25. M2: an image flagged earlier whose recheck is `incomplete` keeps its TÄ badge; a recheck that finds no signal removes it.
 19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
+26. M3 (#16): with the extension loaded, check the same image twice in one browser session and confirm the session cache is populated (`chrome.storage.session` in the worker DevTools) and cleared after a browser restart; entries must never contain image bytes.
 
 ---
 

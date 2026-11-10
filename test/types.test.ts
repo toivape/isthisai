@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   isCheckError,
+  isCheckRecord,
   isCheckResult,
   isCheckUpdate,
   isConfirmUpload,
@@ -137,6 +138,20 @@ const guardCases: GuardCase[] = [
       { ...minimalResult, openai: { state: "done", serverConverted: "yes", c2pa: { outcome: "detected" }, synthid: { outcome: "detected" } } },
       { ...minimalResult, openai: { state: "done", serverConverted: false, synthid: { outcome: "detected" } } },
       { ...minimalResult, openai: { state: "done", serverConverted: false, c2pa: { outcome: "detected" }, synthid: { outcome: "maybe" } } },
+    ],
+  },
+  {
+    name: "isCheckRecord",
+    guard: isCheckRecord,
+    valid: [
+      { checkId: "c1", srcUrl: "https://example.test/i.png", frameUrl: "https://example.test/", tabId: 7, frameId: 0, imageHash: "h1", mediaType: "image/png", size: 1234 },
+    ],
+    invalid: [
+      ...notObjects,
+      {},
+      { checkId: "c1" },
+      { checkId: "c1", srcUrl: "u", frameUrl: "f", tabId: "7", frameId: 0, imageHash: "h1", mediaType: "image/png", size: 1234 },
+      { checkId: "c1", srcUrl: "u", frameUrl: "f", tabId: 7, frameId: 0, imageHash: "h1", mediaType: "image/png" },
     ],
   },
   {
