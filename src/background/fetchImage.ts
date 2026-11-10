@@ -21,20 +21,30 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Serialized URLs are ASCII; a non-ASCII char means a malformed payload.
 function percentDecode(text: string): Uint8Array {
-  const out: number[] = [];
-  const encoder = new TextEncoder();
+  const out = new Uint8Array(text.length);
+  let length = 0;
   for (let at = 0; at < text.length; at++) {
-    const hex = text.charAt(at) === "%" ? text.slice(at + 1, at + 3) : "";
+    const code = text.charCodeAt(at);
+    if (code > 0x7f) throw new Error("non-ASCII data URL payload");
+    const hex = code === 0x25 ? text.slice(at + 1, at + 3) : "";
     if (/^[0-9a-fA-F]{2}$/.test(hex)) {
-      out.push(parseInt(hex, 16));
+      out[length++] = parseInt(hex, 16);
       at += 2;
     } else {
-      out.push(...encoder.encode(String.fromCodePoint(text.codePointAt(at) ?? 0)));
-      if ((text.codePointAt(at) ?? 0) > 0xffff) at++;
+      out[length++] = code;
     }
   }
-  return Uint8Array.from(out);
+  return out.subarray(0, length);
+}
+
+function bytesToBinaryString(bytes: Uint8Array): string {
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  }
+  return binary;
 }
 
 /** data: URL decoder for image/* payloads, base64 or percent-encoded. */
@@ -53,7 +63,7 @@ export function decodeDataUrl(url: string, maxBytes: number = MAX_IMAGE_BYTES): 
   }
   try {
     const raw = percentDecode(payload);
-    const bytes = isBase64 ? decodeBase64(String.fromCharCode(...raw)) : raw;
+    const bytes = isBase64 ? decodeBase64(bytesToBinaryString(raw)) : raw;
     if (bytes.length > maxBytes) return { kind: "error", error: { code: "too_large" } };
     return { kind: "bytes", bytes, mediaType: meta };
   } catch {

@@ -107,6 +107,19 @@ describe("decodeDataUrl", () => {
     expect([...result.bytes]).toEqual([...png]);
   });
 
+  test("decodes multi-MiB data URLs in both encodings", () => {
+    const big = new Uint8Array(2 * MIB);
+    big.set(minimalPng());
+    const b64 = decodeDataUrl(`data:image/png;base64,${encodeBase64(big)}`);
+    expect(b64.kind).toBe("bytes");
+    if (b64.kind === "bytes") expect(b64.bytes.length).toBe(big.length);
+
+    const escaped = [...big.subarray(0, 512 * KIB)].map((b) => `%${b.toString(16).padStart(2, "0")}`).join("");
+    const pct = decodeDataUrl(`data:image/png,${escaped}`);
+    expect(pct.kind).toBe("bytes");
+    if (pct.kind === "bytes") expect(pct.bytes.length).toBe(512 * KIB);
+  });
+
   test("rejects an oversized payload by length before decoding", () => {
     expect(decodeDataUrl(`data:image/png,${"a".repeat(2000)}`, 1000)).toEqual({ kind: "error", error: { code: "too_large" } });
     expect(decodeDataUrl(`data:image/png;base64,${"A".repeat(2000)}`, 1000)).toEqual({
