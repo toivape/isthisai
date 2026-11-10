@@ -7,8 +7,11 @@
 import { isBadgeVisible, shouldBadge } from "./badge";
 import { findImages } from "./findImages";
 import { installOnce } from "./installOnce";
+import { readBlobInPage } from "./readBlob";
+import { errorMessageKey } from "../shared/errors";
 import { message } from "../shared/i18n";
-import { isCheckUpdate, isDismissPopup } from "../shared/types";
+import { isCheckUpdate, isDismissPopup, isReadBlob } from "../shared/types";
+import type { ReadBlobReply } from "../shared/types";
 
 // The idempotently-installed UI instance; the shape is local to the shell.
 export interface ContentShell {
@@ -149,6 +152,10 @@ function createShell(): ContentShell {
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
     closePopup();
+    if (update.status === "failed") {
+      popup = showPopup(errorMessageKey(update.error.code));
+      return;
+    }
     popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
     if (!shouldBadge(update)) return;
     for (const img of findImages(update.srcUrl)) {
@@ -159,6 +166,13 @@ function createShell(): ContentShell {
   // Registered inside the factory so a second injection reuses the whole
   // instance (including this listener) instead of adding a duplicate.
   chrome.runtime.onMessage.addListener(handleMessage);
+
+  // readBlob is request/response: the listener must return the reply promise
+  // synchronously for the worker's sendMessage to settle.
+  chrome.runtime.onMessage.addListener((incoming: unknown): Promise<ReadBlobReply> | undefined => {
+    if (!isReadBlob(incoming)) return undefined;
+    return readBlobInPage(incoming.url);
+  });
 
   return { handleCheckUpdate };
 }

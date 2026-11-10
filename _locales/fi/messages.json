@@ -46,5 +46,20 @@
   },
   "confirm_title_result": {
     "message": "Onko tämä tekoäly? – Tulos"
+  },
+  "error_permission_denied": {
+    "message": "Kuvan käyttöoikeutta ei myönnetty."
+  },
+  "error_fetch_failed": {
+    "message": "Kuvaa ei voitu ladata."
+  },
+  "error_timeout": {
+    "message": "Kuvan lataus kesti liian kauan."
+  },
+  "error_too_large": {
+    "message": "Kuva on liian suuri tarkistettavaksi."
+  },
+  "error_unsupported_type": {
+    "message": "Tämän tyyppistä kuvaa ei tueta."
   }
 }
