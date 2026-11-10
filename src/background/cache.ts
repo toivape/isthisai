@@ -11,8 +11,21 @@ export interface CacheStore {
   set(key: string, value: unknown): Promise<void>;
 }
 
+const DATA_URL = /^data:([^,]*),[\s\S]*$/;
+
+// A data: URL carries the encoded image in its payload, so caching it verbatim
+// would store image bytes and exhaust the 10 MiB session quota (PLAN §4
+// "Cache"). Keep the scheme and media type, drop the payload: the record stays
+// payload-free, and the upload flow recovers data: images from the page the
+// same way it does blob: ones (PLAN §4 step 8.3).
+export function cacheableSrcUrl(srcUrl: string): string {
+  const match = DATA_URL.exec(srcUrl);
+  return match ? `data:${match[1]},` : srcUrl;
+}
+
 export async function putCheck(store: CacheStore, record: CheckRecord): Promise<void> {
-  await store.set(`${CHECK_KEY_PREFIX}${record.checkId}`, record);
+  const safe = { ...record, srcUrl: cacheableSrcUrl(record.srcUrl) };
+  await store.set(`${CHECK_KEY_PREFIX}${record.checkId}`, safe);
 }
 
 export async function getCheck(store: CacheStore, checkId: string): Promise<CheckRecord | undefined> {

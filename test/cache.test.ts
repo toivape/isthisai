@@ -46,10 +46,15 @@ function fakeStore(initial: Record<string, unknown> = {}) {
   return { store, data, sets };
 }
 
-// No image bytes may ever be cached (PLAN §4 "Cache").
+// No image bytes may ever be cached (PLAN §4 "Cache"). This catches binary
+// containers AND long encoded payloads hidden in strings (a data: URL stores
+// the image as base64, which a typed-array-only check would miss).
+const LONG_ENCODED = /[A-Za-z0-9+/%]{512,}/;
+
 function containsBinary(value: unknown): boolean {
   if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return true;
   if (typeof Blob !== "undefined" && value instanceof Blob) return true;
+  if (typeof value === "string") return LONG_ENCODED.test(value);
   if (Array.isArray(value)) return value.some(containsBinary);
   if (typeof value === "object" && value !== null) return Object.values(value).some(containsBinary);
   return false;
@@ -128,5 +133,47 @@ describe("no bytes are cached", () => {
     await putCheck(store, record());
     expect(containsBinary(sets[0].value)).toBe(false);
     expect(JSON.parse(JSON.stringify(sets[0].value))).toEqual(sets[0].value);
+  });
+});
+
+// A data: URL srcUrl carries the encoded image, so storing it verbatim is
+// storing image bytes (and would blow the 10 MB session quota).
+describe("data: URLs never put their payload in the cache", () => {
+  const PAYLOAD = "iVBORw0KGgoAAAANSUhEUg" + "A".repeat(200);
+  const BASE64 = `data:image/png;base64,${PAYLOAD}`;
+
+  test("a base64 data: URL is stored without its payload", async () => {
+    const { store, sets } = fakeStore();
+    await putCheck(store, record({ srcUrl: BASE64 }));
+    const stored = sets[0].value as CheckRecord;
+    expect(stored.srcUrl).toBe("data:image/png;base64,");
+    expect(JSON.stringify(stored)).not.toContain(PAYLOAD);
+  });
+
+  test("a percent-encoded data: URL is stored without its payload", async () => {
+    const { store, sets } = fakeStore();
+    await putCheck(store, record({ srcUrl: "data:image/svg+xml,%3Csvg%3E%3C/svg%3E" }));
+    expect((sets[0].value as CheckRecord).srcUrl).toBe("data:image/svg+xml,");
+  });
+
+  test("a 1 MiB image stays a tiny record (session quota guard)", async () => {
+    const { store, sets } = fakeStore();
+    const big = `data:image/png;base64,${"A".repeat(1024 * 1024)}`;
+    await putCheck(store, record({ srcUrl: big }));
+    expect(JSON.stringify(sets[0].value).length).toBeLessThan(500);
+  });
+
+  test("getCheck returns the payload-free reference", async () => {
+    const { store } = fakeStore();
+    await putCheck(store, record({ srcUrl: BASE64 }));
+    expect((await getCheck(store, "check-1"))?.srcUrl).toBe("data:image/png;base64,");
+  });
+
+  test("http and blob: URLs are stored unchanged", async () => {
+    const { store, sets } = fakeStore();
+    await putCheck(store, record({ srcUrl: "https://cdn.example/a,b.png?x=1,2" }));
+    expect((sets[0].value as CheckRecord).srcUrl).toBe("https://cdn.example/a,b.png?x=1,2");
+    await putCheck(store, record({ checkId: "c2", srcUrl: "blob:https://page.example/uuid" }));
+    expect((sets[1].value as CheckRecord).srcUrl).toBe("blob:https://page.example/uuid");
   });
 });
