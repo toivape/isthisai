@@ -5,9 +5,11 @@
 
 import type { CheckError, CheckUpdate, DismissPopup, ReadBlobReply } from "../shared/types";
 import { resultWindowPath } from "../shared/errors";
+import { sessionStore } from "./cache";
 import { runCheckSteps } from "./check";
 import { readC2pa } from "./c2pa";
 import { readBlobRequest } from "./fetchImage";
+import { scanXmp } from "./xmp";
 import { needsPermissionRequest } from "./permissions";
 
 const MENU_ID = "check-ai-signals";
@@ -125,10 +127,12 @@ async function runCheck(input: {
       sendUpdate: (update) => chrome.tabs.sendMessage(tabId, update, { frameId }).catch(() => undefined),
       readBlob: (url) => readBlobInFrame(tabId, frameId, checkId, url),
       readC2pa,
+      scanXmp,
+      store: sessionStore,
       wasmSource: chrome.runtime.getURL("c2pa.wasm"),
       hasApiKey,
     },
-    { checkId, srcUrl },
+    { checkId, srcUrl, frameUrl: input.frameUrl, tabId, frameId },
   );
 }
 
