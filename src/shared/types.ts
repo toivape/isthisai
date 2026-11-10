@@ -13,17 +13,19 @@ export type OpenAiResultPart =
       synthid: { outcome: "detected" | "not_detected"; model?: string; generatedAt?: string };
     };
 
+export interface LocalC2pa {
+  manifest: "absent" | "present" | "invalid" | "remote_unfetched" | "error";
+  aiAction: boolean;
+  claimedIssuer?: string;
+  claimedModel?: string;
+  generatedAt?: string;
+}
+
 export interface CheckResult {
   imageHash: string;
   mediaType: string;
   verdict: "ai_signal" | "no_signal" | "incomplete";
-  localC2pa: {
-    manifest: "absent" | "present" | "invalid" | "remote_unfetched" | "error";
-    aiAction: boolean;
-    claimedIssuer?: string;
-    claimedModel?: string;
-    generatedAt?: string;
-  };
+  localC2pa: LocalC2pa;
   localXmp: {
     state: "detected" | "not_detected" | "error";
     digitalSourceType?: string;
