@@ -120,6 +120,26 @@ describe("decodeDataUrl", () => {
     if (pct.kind === "bytes") expect(pct.bytes.length).toBe(512 * KIB);
   });
 
+  test("enforces the limit on decoded bytes at the boundary, in every encoding", () => {
+    const at = (n: number): Uint8Array => new Uint8Array(n).fill(0x41);
+    const pct = (bytes: Uint8Array): string => [...bytes].map((b) => `%${b.toString(16).padStart(2, "0")}`).join("");
+    const b64Escaped = (bytes: Uint8Array): string =>
+      [...encodeBase64(bytes)].map((c) => `%${c.charCodeAt(0).toString(16)}`).join("");
+    const encodings: Array<[string, (bytes: Uint8Array) => string]> = [
+      ["data:image/png;base64,", encodeBase64],
+      ["data:image/png,", pct],
+      ["data:image/png;base64,", b64Escaped],
+    ];
+    for (const [prefix, encode] of encodings) {
+      const ok = decodeDataUrl(prefix + encode(at(1000)), 1000);
+      expect(ok.kind, `${prefix} at the limit`).toBe("bytes");
+      expect(decodeDataUrl(prefix + encode(at(1001)), 1000), `${prefix} over the limit`).toEqual({
+        kind: "error",
+        error: { code: "too_large" },
+      });
+    }
+  });
+
   test("rejects an oversized payload by length before decoding", () => {
     expect(decodeDataUrl(`data:image/png,${"a".repeat(2000)}`, 1000)).toEqual({ kind: "error", error: { code: "too_large" } });
     expect(decodeDataUrl(`data:image/png;base64,${"A".repeat(2000)}`, 1000)).toEqual({

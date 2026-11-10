@@ -4,6 +4,7 @@
 // kept in module variables.
 
 import type { CheckError, CheckUpdate, DismissPopup, ReadBlobReply } from "../shared/types";
+import { resultWindowPath } from "../shared/errors";
 import { collectImage, readBlobRequest } from "./fetchImage";
 import { needsPermissionRequest } from "./permissions";
 
@@ -32,25 +33,20 @@ const RESULT_WINDOW_KEY = "resultWindowId";
 async function openResultWindow(error?: CheckError): Promise<void> {
   const stored = await chrome.storage.session.get(RESULT_WINDOW_KEY);
   const existingId: unknown = stored[RESULT_WINDOW_KEY];
+  const url = resultWindowPath(error);
   if (typeof existingId === "number") {
     try {
-      if (error) {
-        // An open window cannot be re-pointed at the new error; replace it.
-        await chrome.windows.remove(existingId);
-      } else {
-        await chrome.windows.update(existingId, { focused: true });
-        return;
-      }
+      // Re-point the open window at this request so it never shows a stale error.
+      const existing = await chrome.windows.get(existingId, { populate: true });
+      const existingTabId = existing.tabs?.[0]?.id;
+      if (existingTabId !== undefined) await chrome.tabs.update(existingTabId, { url: chrome.runtime.getURL(url) });
+      await chrome.windows.update(existingId, { focused: true });
+      return;
     } catch {
       // window was closed; open a new one
     }
   }
-  const created = await chrome.windows.create({
-    type: "popup",
-    url: `src/confirm/confirm.html?view=result${error ? `&error=${error.code}` : ""}`,
-    width: 420,
-    height: 320,
-  });
+  const created = await chrome.windows.create({ type: "popup", url, width: 420, height: 320 });
   if (created?.id !== undefined) await chrome.storage.session.set({ [RESULT_WINDOW_KEY]: created.id });
 }
 

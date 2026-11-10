@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { errorMessageKey } from "../src/shared/errors";
+import { errorMessageKey, resultWindowPath } from "../src/shared/errors";
 import type { CheckErrorCode } from "../src/shared/types";
 
 const CODES: CheckErrorCode[] = ["permission_denied", "fetch_failed", "timeout", "too_large", "unsupported_type"];
@@ -15,5 +15,12 @@ describe("errorMessageKey", () => {
 
   test("keys follow the error_<code> convention", () => {
     expect(errorMessageKey("timeout")).toBe("error_timeout");
+  });
+});
+
+describe("resultWindowPath", () => {
+  test("carries the error code only when there is an error", () => {
+    expect(resultWindowPath()).toBe("src/confirm/confirm.html?view=result");
+    expect(resultWindowPath({ code: "permission_denied" })).toBe("src/confirm/confirm.html?view=result&error=permission_denied");
   });
 });

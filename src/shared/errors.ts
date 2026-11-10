@@ -1,4 +1,4 @@
-import type { CheckErrorCode } from "./types";
+import type { CheckError, CheckErrorCode } from "./types";
 
 const KEYS: Record<CheckErrorCode, string> = {
   permission_denied: "error_permission_denied",
@@ -9,3 +9,6 @@ const KEYS: Record<CheckErrorCode, string> = {
 };
 
 export const errorMessageKey = (code: CheckErrorCode): string => KEYS[code];
+
+export const resultWindowPath = (error?: CheckError): string =>
+  `src/confirm/confirm.html?view=result${error ? `&error=${error.code}` : ""}`;

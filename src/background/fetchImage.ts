@@ -55,9 +55,11 @@ export function decodeDataUrl(url: string, maxBytes: number = MAX_IMAGE_BYTES): 
   if (!meta.toLowerCase().startsWith("image/")) return unsupported;
   const isBase64 = params.some((param) => param.trim().toLowerCase() === "base64");
   const payload = url.slice(comma + 1);
-  // Length bound before any decoding: base64 yields <= 3/4 byte per char,
-  // percent-encoding <= 1 byte per char.
-  if ((isBase64 ? Math.floor((payload.length * 3) / 4) : payload.length) > maxBytes) {
+  // Cheap rejection before decoding, using a lower bound on the decoded size
+  // (every byte takes at most 3 chars as %XX, every base64 byte at least 4/3
+  // chars, and escaped base64 chars take 3 each; -2 allows for base64 padding).
+  // The exact check follows decoding.
+  if (payload.length / (isBase64 ? 4 : 3) - 2 > maxBytes) {
     return { kind: "error", error: { code: "too_large" } };
   }
   try {
