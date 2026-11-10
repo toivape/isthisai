@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { matchesSrcUrl } from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
 import { isBadgeVisible, shouldBadge } from "../src/content/badge";
+import { isStaleUpdate, verdictPresentation } from "../src/content/presentation";
 import { readFileSync } from "node:fs";
 import type { CheckUpdate } from "../src/shared/types";
 import type { ContentShell } from "../src/content/index";
@@ -167,5 +168,44 @@ describe("no-signal caveat strings", () => {
   test("name the missing signal instead of relying on a preceding headline", () => {
     expect(caveat("en")).toBe("No signal does not mean the image is human-made.");
     expect(caveat("fi")).toMatch(/^Tekoälyn merkin puuttuminen/);
+  });
+});
+
+describe("isStaleUpdate", () => {
+  const update = (status: "checking" | "done" | "failed", checkId: string) =>
+    ({ type: "checkUpdate", checkId, srcUrl: "u", status }) as unknown as CheckUpdate;
+
+  test("a checking update is never stale", () => {
+    expect(isStaleUpdate("a", update("checking", "b"))).toBe(false);
+  });
+
+  test("a done or failed update for another check is stale", () => {
+    expect(isStaleUpdate("b", update("done", "a"))).toBe(true);
+    expect(isStaleUpdate("b", update("failed", "a"))).toBe(true);
+  });
+
+  test("a terminal update for the active check is not stale", () => {
+    expect(isStaleUpdate("a", update("done", "a"))).toBe(false);
+  });
+
+  test("with no active check a terminal update is accepted (failure before any checking)", () => {
+    expect(isStaleUpdate(undefined, update("failed", "a"))).toBe(false);
+  });
+});
+
+describe("verdictPresentation", () => {
+  test("ai_signal has the AI headline and no extra detail", () => {
+    expect(verdictPresentation("ai_signal")).toEqual({ headlineKey: "popup_headline_ai_signal" });
+  });
+
+  test("no_signal has the no-signal headline", () => {
+    expect(verdictPresentation("no_signal")).toEqual({ headlineKey: "popup_headline_no_signal" });
+  });
+
+  test("incomplete is never presented as no signal", () => {
+    expect(verdictPresentation("incomplete")).toEqual({
+      headlineKey: "popup_headline_incomplete",
+      detailKey: "popup_detail_incomplete",
+    });
   });
 });

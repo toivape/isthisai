@@ -23,11 +23,6 @@ function fakeDeps(overrides: {
   hasApiKey?: () => Promise<boolean>;
 }) {
   const updates = fakeUpdates();
-  const calls = {
-    collect: 0,
-    c2pa: 0,
-    verdict: 0,
-  };
   const deps = {
     sendUpdate: updates.sendUpdate,
     readBlob: vi.fn(async (): Promise<ReadBlobReply> => ({ ok: false })),
@@ -37,9 +32,8 @@ function fakeDeps(overrides: {
       (vi.fn(async () => ({ manifest: "absent", aiAction: false })) as unknown as typeof import("../src/background/c2pa").readC2pa),
     hasApiKey: overrides.hasApiKey ?? (async () => false),
     wasmSource: WASM_BYTES,
-    now: () => new Date(),
   };
-  return { deps, updates, calls };
+  return { deps, updates };
 }
 
 function pngResponse(): Response {
@@ -47,7 +41,7 @@ function pngResponse(): Response {
 }
 
 describe("runCheckSteps", () => {
-  test("success path: fetch, C2PA, verdict once; checking then done", async () => {
+  test("success path: fetch and C2PA once; checking then done", async () => {
     const fetchImpl = vi.fn(async () => pngResponse());
     const readC2pa = vi.fn(async () => ({ manifest: "absent", aiAction: false })) as unknown as typeof import("../src/background/c2pa").readC2pa;
     const { deps, updates } = fakeDeps({ fetchImpl, readC2pa });
@@ -114,5 +108,27 @@ describe("runCheckSteps", () => {
     const done = updates.sent[1];
     if (done.status !== "done") throw new Error("expected done");
     expect(done.result.verdict).toBe("no_signal");
+  });
+
+  test("awaits an asynchronous sendUpdate so the terminal update lands before the pipeline resolves", async () => {
+    const fetchImpl = vi.fn(async () => pngResponse());
+    const { deps } = fakeDeps({ fetchImpl });
+    const delivered: string[] = [];
+    deps.sendUpdate = async (update: CheckUpdate) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      delivered.push(update.status);
+    };
+    await runCheckSteps(deps, { srcUrl: "https://page.example/i.png", checkId: "c1" });
+    expect(delivered).toEqual(["checking", "done"]);
+  });
+
+  test("a C2PA read error gives verdict incomplete, not no_signal", async () => {
+    const fetchImpl = vi.fn(async () => pngResponse());
+    const readC2pa = vi.fn(async () => ({ manifest: "error", aiAction: false })) as unknown as typeof import("../src/background/c2pa").readC2pa;
+    const { deps, updates } = fakeDeps({ fetchImpl, readC2pa });
+    await runCheckSteps(deps, { srcUrl: "https://page.example/i.png", checkId: "c1" });
+    const done = updates.sent[1];
+    if (done.status !== "done") throw new Error("expected done");
+    expect(done.result.verdict).toBe("incomplete");
   });
 });

@@ -7,11 +7,12 @@
 import { isBadgeVisible, shouldBadge } from "./badge";
 import { findImages } from "./findImages";
 import { installOnce } from "./installOnce";
+import { isStaleUpdate, verdictPresentation } from "./presentation";
 import { readBlobInPage } from "./readBlob";
 import { errorMessageKey } from "../shared/errors";
 import { message } from "../shared/i18n";
 import { isCheckUpdate, isDismissPopup, isReadBlob } from "../shared/types";
-import type { ReadBlobReply } from "../shared/types";
+import type { CheckUpdate, ReadBlobReply } from "../shared/types";
 
 // The idempotently-installed UI instance; the shape is local to the shell.
 export interface ContentShell {
@@ -65,6 +66,20 @@ function createShell(): ContentShell {
 
   let popup: PopupHandle | undefined;
   const badges = new Map<HTMLImageElement, HTMLDivElement>();
+  let activeCheckId: string | undefined;
+
+  type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
+
+  function showResult(update: DoneUpdate): void {
+    const { headlineKey, detailKey } = verdictPresentation(update.result.verdict);
+    const issuer = update.result.localC2pa.claimedIssuer;
+    const detail = detailKey
+      ? message(detailKey)
+      : issuer
+        ? message("popup_detail_claimed_issuer", [issuer])
+        : undefined;
+    popup = showPopup(headlineKey, "popup_caveat_no_signal", detail);
+  }
 
   function closePopup(): void {
     popup?.close();
@@ -133,8 +148,8 @@ function createShell(): ContentShell {
   window.addEventListener("scroll", repositionBadges, { capture: true });
   window.addEventListener("resize", repositionBadges);
 
-  function addBadge(img: HTMLImageElement): void {
-    if (badges.has(img)) return;
+  function addBadge(img: HTMLImageElement, update: DoneUpdate): void {
+    badges.get(img)?.remove();
     const badge = document.createElement("div");
     badge.className = "isthisai-badge";
     badge.textContent = "TÄ";
@@ -142,7 +157,7 @@ function createShell(): ContentShell {
     badge.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
       closePopup();
-      popup = showPopup("popup_headline_ai_signal");
+      showResult(update);
     });
     shadow.appendChild(badge);
     positionBadge(badge, img);
@@ -150,31 +165,30 @@ function createShell(): ContentShell {
   }
 
   function handleMessage(message: unknown): void {
-    if (isDismissPopup(message)) closePopup();
-    else handleCheckUpdate(message);
+    if (isDismissPopup(message)) {
+      activeCheckId = undefined;
+      closePopup();
+    } else {
+      handleCheckUpdate(message);
+    }
   }
 
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
+    if (isStaleUpdate(activeCheckId, update)) return;
     closePopup();
     if (update.status === "failed") {
       popup = showPopup(errorMessageKey(update.error.code));
       return;
     }
     if (update.status === "done") {
-      // Headline by verdict (hard rule 8: never "real"/"fake"); the claimed
-      // issuer is shown as claimed, signer not verified (no trust list).
-      const headlineKey =
-        update.result.verdict === "ai_signal" ? "popup_headline_ai_signal" : "popup_headline_no_signal";
-      const detail = update.result.localC2pa.claimedIssuer
-        ? message("popup_detail_claimed_issuer", [update.result.localC2pa.claimedIssuer])
-        : undefined;
-      popup = showPopup(headlineKey, "popup_caveat_no_signal", detail);
+      showResult(update);
       if (shouldBadge(update)) {
-        for (const img of findImages(update.srcUrl)) addBadge(img);
+        for (const img of findImages(update.srcUrl)) addBadge(img, update);
       }
       return;
     }
+    activeCheckId = update.checkId;
     popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
   }
 

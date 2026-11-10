@@ -27,14 +27,14 @@ export type CheckOutcome = { kind: "done"; openai: OpenAiAvailability } | { kind
 
 export async function runCheckSteps(deps: CheckDeps, input: CheckInput): Promise<CheckOutcome> {
   const { checkId, srcUrl } = input;
-  deps.sendUpdate({ type: "checkUpdate", checkId, srcUrl, status: "checking" });
+  await deps.sendUpdate({ type: "checkUpdate", checkId, srcUrl, status: "checking" });
 
   const collected: CollectedImage = await collectImage(srcUrl, {
     fetchImpl: deps.fetchImpl,
     readBlob: deps.readBlob,
   });
   if (collected.kind === "error") {
-    deps.sendUpdate({ type: "checkUpdate", checkId, srcUrl, status: "failed", error: collected.error });
+    await deps.sendUpdate({ type: "checkUpdate", checkId, srcUrl, status: "failed", error: collected.error });
     return { kind: "failed", error: collected.error };
   }
 
@@ -60,6 +60,6 @@ export async function runCheckSteps(deps: CheckDeps, input: CheckInput): Promise
     result: { ...result, verdict },
     openai,
   };
-  deps.sendUpdate(done);
+  await deps.sendUpdate(done);
   return { kind: "done", openai };
 }
