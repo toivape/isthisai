@@ -174,23 +174,21 @@ describe("originsToCheck / needsPermissionRequest", () => {
 
   test("needsPermissionRequest follows the plan rule", () => {
     const main = "https://page.example/";
-    expect(needsPermissionRequest(main, main, "https://page.example/i.png", false)).toBe(false);
-    expect(needsPermissionRequest(main, main, "https://cdn.example/i.png", true)).toBe(false);
-    expect(needsPermissionRequest(main, main, "https://cdn.example/i.png", false)).toBe(true);
-    expect(needsPermissionRequest(main, main, "data:image/png;base64,AAA", false)).toBe(false);
+    expect(needsPermissionRequest(main, main, "https://page.example/i.png")).toBe(false);
+    expect(needsPermissionRequest(main, main, "https://cdn.example/i.png")).toBe(true);
+    expect(needsPermissionRequest(main, main, "data:image/png;base64,AAA")).toBe(false);
   });
 
   test("a cross-origin frame needs the permission whatever the image url is", () => {
     const main = "https://page.example/";
     const frame = "https://embed.example/f.html";
-    expect(needsPermissionRequest(main, frame, "data:image/png;base64,AAA", false)).toBe(true);
-    expect(needsPermissionRequest(main, frame, "blob:https://embed.example/uuid", false)).toBe(true);
-    expect(needsPermissionRequest(main, frame, "https://page.example/i.png", false)).toBe(true);
-    expect(needsPermissionRequest(main, frame, "https://embed.example/i.png", true)).toBe(false);
+    expect(needsPermissionRequest(main, frame, "data:image/png;base64,AAA")).toBe(true);
+    expect(needsPermissionRequest(main, frame, "blob:https://embed.example/uuid")).toBe(true);
+    expect(needsPermissionRequest(main, frame, "https://page.example/i.png")).toBe(true);
   });
 
   test("a frame without an http(s) origin does not trigger the prompt", () => {
-    expect(needsPermissionRequest("https://page.example/", "about:blank", "data:image/png;base64,AAA", false)).toBe(false);
+    expect(needsPermissionRequest("https://page.example/", "about:blank", "data:image/png;base64,AAA")).toBe(false);
   });
 });
 
