@@ -94,26 +94,19 @@ async function runCheck(input: {
   srcUrl: string;
   mainFrameUrl: string;
   frameUrl: string;
+  permissionGranted: boolean;
 }): Promise<void> {
-  const { tabId, frameId, srcUrl, mainFrameUrl, frameUrl } = input;
+  const { tabId, frameId, srcUrl, permissionGranted } = input;
   const checkId = crypto.randomUUID();
 
-  // Host permission first, with no await before it: the user gesture from the
-  // menu click must still be live for permissions.request (spike #3). The
-  // permission check itself is awaited, but the request call is the first
-  // async chrome API call in this handler.
-  let containsAllUrls = false;
-  try {
-    containsAllUrls = await chrome.permissions.contains({ origins: ["<all_urls>"] });
-  } catch {
-    containsAllUrls = false;
-  }
-  if (needsPermissionRequest(mainFrameUrl, frameUrl, srcUrl, containsAllUrls)) {
-    const granted = await chrome.permissions.request({ origins: ["<all_urls>"] });
-    if (!granted) {
-      await notifyFailed(tabId, frameId, checkId, srcUrl, { code: "permission_denied" });
-      return;
-    }
+  if (!permissionGranted) {
+    // Establish the check in the frame first: a failed update with an
+    // unknown checkId is dropped by the stale-update guard, and a live
+    // content script would swallow the denial message otherwise.
+    const checking: CheckUpdate = { type: "checkUpdate", checkId, srcUrl, status: "checking" };
+    await chrome.tabs.sendMessage(tabId, checking, { frameId }).catch(() => undefined);
+    await notifyFailed(tabId, frameId, checkId, srcUrl, { code: "permission_denied" });
+    return;
   }
 
   const dismiss = { type: "dismissPopup" } satisfies DismissPopup;
@@ -148,7 +141,24 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   // tab.url is the main frame's URL.
   const mainFrameUrl = tab.url ?? "";
   const frameUrl = info.frameUrl ?? mainFrameUrl;
-  void runCheck({ tabId, frameId, srcUrl, mainFrameUrl, frameUrl }).catch((error: unknown) => {
-    console.error("check failed", error);
+
+  const start = (permissionGranted: boolean): void => {
+    void runCheck({ tabId, frameId, srcUrl, mainFrameUrl, frameUrl, permissionGranted }).catch((error: unknown) => {
+      console.error("check failed", error);
+    });
+  };
+
+  // permissions.request must run synchronously here, while the menu click's
+  // user gesture is live: any await before it drops the gesture ("This
+  // function must be called during a user gesture"; measured by the owner in
+  // Brave, PLAN §4 step 1). An already-granted permission resolves request()
+  // true without prompting, so the URL analysis alone decides.
+  if (!needsPermissionRequest(mainFrameUrl, frameUrl, srcUrl)) {
+    start(true);
+    return;
+  }
+  chrome.permissions.request({ origins: ["<all_urls>"] }).then(start, (error: unknown) => {
+    console.error("permission request failed", error);
+    start(false);
   });
 });

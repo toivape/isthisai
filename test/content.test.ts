@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { matchesSrcUrl } from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
 import { isBadgeVisible, shouldBadge } from "../src/content/badge";
-import { isStaleUpdate, verdictPresentation } from "../src/content/presentation";
+import { isStaleUpdate, verdictPresentation, DISMISS_ID } from "../src/content/presentation";
 import { readFileSync } from "node:fs";
 import type { CheckUpdate } from "../src/shared/types";
 import type { ContentShell } from "../src/content/index";
@@ -190,6 +190,23 @@ describe("isStaleUpdate", () => {
 
   test("with no active check a terminal update is accepted (failure before any checking)", () => {
     expect(isStaleUpdate(undefined, update("failed", "a"))).toBe(false);
+  });
+});
+
+describe("dismissed frame rejects until a new check arrives", () => {
+  const update = (status: "checking" | "done" | "failed", checkId: string) =>
+    ({ type: "checkUpdate", checkId, srcUrl: "u", status }) as unknown as CheckUpdate;
+
+  // After the tab-wide dismiss (check B started elsewhere), frame A must not
+  // accept its own in-flight check's terminal update: two popups must never
+  // coexist. Only a new "checking" reopens this frame.
+  test("a dismissed frame drops the old check's terminal updates", () => {
+    expect(isStaleUpdate(DISMISS_ID, update("done", "a"))).toBe(true);
+    expect(isStaleUpdate(DISMISS_ID, update("failed", "a"))).toBe(true);
+  });
+
+  test("a dismissed frame accepts a new checking update", () => {
+    expect(isStaleUpdate(DISMISS_ID, update("checking", "b"))).toBe(false);
   });
 });
 

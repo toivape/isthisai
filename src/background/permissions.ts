@@ -36,14 +36,15 @@ export function originsToCheck(frameUrl: string, srcUrl: string): string[] {
  * True when the <all_urls> prompt must be shown before injecting and fetching:
  * the clicked frame's origin (injection) or the image's origin (fetch) differs
  * from the main-frame origin that activeTab covers.
+ *
+ * Pure URL analysis by design: this runs synchronously inside the menu-click
+ * listener, where the user gesture is still live — permissions.request must be
+ * the first async call (an awaited contains() drops the gesture; measured by
+ * the owner in Brave, PLAN §4 step 1). An already-granted permission resolves
+ * request() true without prompting (Chromium keeps granted permissions), so
+ * there is no contains() pre-check to avoid redundant prompts.
  */
-export function needsPermissionRequest(
-  mainFrameUrl: string,
-  frameUrl: string,
-  srcUrl: string,
-  containsAllUrls: boolean,
-): boolean {
-  if (containsAllUrls) return false;
+export function needsPermissionRequest(mainFrameUrl: string, frameUrl: string, srcUrl: string): boolean {
   const main = urlOriginPattern(mainFrameUrl);
   return originsToCheck(frameUrl, srcUrl).some((origin) => origin !== main);
 }
