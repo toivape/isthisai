@@ -7,8 +7,10 @@
 import { isBadgeVisible, shouldBadge } from "./badge";
 import { findImages } from "./findImages";
 import { installOnce } from "./installOnce";
+import { readBlobInPage } from "./readBlob";
 import { message } from "../shared/i18n";
-import { isCheckUpdate, isDismissPopup } from "../shared/types";
+import { isCheckUpdate, isDismissPopup, isReadBlob } from "../shared/types";
+import type { ReadBlobReply } from "../shared/types";
 
 // The idempotently-installed UI instance; the shape is local to the shell.
 export interface ContentShell {
@@ -162,5 +164,13 @@ function createShell(): ContentShell {
 
   return { handleCheckUpdate };
 }
+
+// readBlob is request/response: the listener must return the reply promise
+// synchronously for the worker's sendMessage to settle. Registered once at
+// module level; installOnce already guards against double injection.
+chrome.runtime.onMessage.addListener((incoming: unknown): Promise<ReadBlobReply> | undefined => {
+  if (!isReadBlob(incoming)) return undefined;
+  return readBlobInPage(incoming.url);
+});
 
 void installOnce(INSTANCE_KEY, createShell);

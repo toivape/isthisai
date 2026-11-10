@@ -80,7 +80,9 @@ export type OpenAiAvailability = { available: true } | { available: false; reaso
 
 // worker -> content script, request/response
 export type ReadBlob = { type: "readBlob"; checkId: string; url: string };
-export type ReadBlobReply = { ok: true; base64: string } | { ok: false };
+// ok:false reason: "too_large" (over 45 MiB, protects the 64 MiB message
+// ceiling) or absent for a failed/revoked read.
+export type ReadBlobReply = { ok: true; base64: string } | { ok: false; reason?: "too_large" };
 
 // content script -> worker
 export type OpenAiRequest = { type: "openaiRequest"; checkId: string };
@@ -220,7 +222,10 @@ export function isReadBlob(value: unknown): value is ReadBlob {
 export function isReadBlobReply(value: unknown): value is ReadBlobReply {
   if (!isObject(value)) return false;
   if (value.ok === true) return isString(value.base64);
-  return value.ok === false;
+  if (value.ok === false) {
+    return value.reason === undefined || value.reason === "too_large";
+  }
+  return false;
 }
 
 export function isOpenAiRequest(value: unknown): value is OpenAiRequest {

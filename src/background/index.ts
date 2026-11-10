@@ -3,7 +3,9 @@
 // at any time, so listeners are registered synchronously and no state is
 // kept in module variables.
 
-import type { CheckUpdate, DismissPopup } from "../shared/types";
+import type { CheckError, CheckUpdate, DismissPopup, ReadBlobReply } from "../shared/types";
+import { collectImage } from "./fetchImage";
+import { needsPermissionRequest } from "./permissions";
 
 const MENU_ID = "check-ai-signals";
 
@@ -47,25 +49,98 @@ async function openResultWindow(): Promise<void> {
   if (created?.id !== undefined) await chrome.storage.session.set({ [RESULT_WINDOW_KEY]: created.id });
 }
 
+// Reads a blob: URL in the frame that owns it (only the page can); the reply
+// is base64 (messages are JSON-only). A missing reader (frame not injected)
+// behaves like a revoked blob: fetch_failed.
+async function readBlobInFrame(tabId: number, frameId: number, url: string): Promise<ReadBlobReply> {
+  try {
+    const reply: unknown = await chrome.tabs.sendMessage(tabId, { type: "readBlob", url }, { frameId });
+    if (reply && typeof reply === "object" && "ok" in reply) return reply as ReadBlobReply;
+    return { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function notifyFailed(
+  tabId: number,
+  frameId: number,
+  checkId: string,
+  srcUrl: string,
+  error: CheckError,
+): Promise<void> {
+  await chrome.tabs
+    .sendMessage(tabId, { type: "checkUpdate", checkId, srcUrl, status: "failed", error }, { frameId })
+    .catch(() => undefined);
+}
+
+async function runCheck(input: { tabId: number; frameId: number; srcUrl: string; mainFrameUrl: string }): Promise<void> {
+  const { tabId, frameId, srcUrl, mainFrameUrl } = input;
+  const checkId = crypto.randomUUID();
+
+  // Host permission first, with no await before it: the user gesture from the
+  // menu click must still be live for permissions.request (spike #3). The
+  // permission check itself is awaited, but the request call is the first
+  // async chrome API call in this handler.
+  let containsAllUrls = false;
+  try {
+    containsAllUrls = await chrome.permissions.contains({ origins: ["<all_urls>"] });
+  } catch {
+    containsAllUrls = false;
+  }
+  if (needsPermissionRequest(mainFrameUrl, srcUrl, containsAllUrls)) {
+    const granted = await chrome.permissions.request({ origins: ["<all_urls>"] });
+    if (!granted) {
+      await notifyFailed(tabId, frameId, checkId, srcUrl, { code: "permission_denied" });
+      return;
+    }
+  }
+
+  const checking = {
+    type: "checkUpdate",
+    checkId,
+    srcUrl,
+    status: "checking",
+  } satisfies CheckUpdate;
+  const dismiss = { type: "dismissPopup" } satisfies DismissPopup;
+
+  try {
+    await chrome.tabs.sendMessage(tabId, dismiss).catch(() => undefined); // no frame has the script yet
+    await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: ["content/index.js"] });
+    await chrome.tabs.sendMessage(tabId, checking, { frameId });
+  } catch (error) {
+    console.error("injection failed", error);
+    await openResultWindow().catch(console.error);
+    return;
+  }
+
+  const collected = await collectImage(srcUrl, {
+    readBlob: (url) => readBlobInFrame(tabId, frameId, url),
+  });
+
+  if (collected.kind === "error") {
+    await notifyFailed(tabId, frameId, checkId, srcUrl, collected.error);
+    return;
+  }
+
+  // #17 wires C2PA, verdict and the done update; for now record what the
+  // fetch produced so M2 wiring has the values it needs.
+  console.log("image collected", {
+    mediaType: collected.mediaType,
+    size: collected.size,
+    imageHash: collected.imageHash,
+  });
+}
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId !== MENU_ID || tab?.id === undefined || !info.srcUrl || info.frameId === undefined) return;
   const tabId = tab.id;
   const frameId = info.frameId;
   const srcUrl = info.srcUrl;
-  const update = {
-    type: "checkUpdate",
-    checkId: crypto.randomUUID(),
-    srcUrl,
-    status: "checking",
-  } satisfies CheckUpdate;
-  const dismiss = { type: "dismissPopup" } satisfies DismissPopup;
-  void chrome.tabs
-    .sendMessage(tabId, dismiss)
-    .catch(() => undefined) // no frame has the script yet
-    .then(() => chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: ["content/index.js"] }))
-    .then(() => chrome.tabs.sendMessage(tabId, update, { frameId }))
-    .catch((error: unknown) => {
-      console.error("injection failed", error);
-      void openResultWindow().catch(console.error);
-    });
+  // The main-frame origin decides whether the image origin is cross-origin;
+  // tab.url is the main frame's URL.
+  const mainFrameUrl = tab.url ?? "";
+  void runCheck({ tabId, frameId, srcUrl, mainFrameUrl }).catch((error: unknown) => {
+    console.error("check failed", error);
+  });
 });
