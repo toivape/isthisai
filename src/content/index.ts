@@ -4,10 +4,10 @@
 // no key access, no network. Injected only after a menu click, never via a
 // manifest content_scripts entry (hard rule 1).
 
-import { isBadgeVisible, shouldBadge } from "./badge";
+import { badgeAction, isBadgeVisible } from "./badge";
 import { findImages } from "./findImages";
 import { installOnce } from "./installOnce";
-import { isStaleUpdate, verdictPresentation } from "./presentation";
+import { DISMISS_ID, isStaleUpdate, verdictPresentation } from "./presentation";
 import { readBlobInPage } from "./readBlob";
 import { errorMessageKey } from "../shared/errors";
 import { message } from "../shared/i18n";
@@ -164,9 +164,17 @@ function createShell(): ContentShell {
     badges.set(img, badge);
   }
 
+  function removeBadge(img: HTMLImageElement): void {
+    badges.get(img)?.remove();
+    badges.delete(img);
+  }
+
   function handleMessage(message: unknown): void {
     if (isDismissPopup(message)) {
-      activeCheckId = undefined;
+      // A newer check started elsewhere in the tab: this frame is invalidated
+      // (terminal updates of its own in-flight check must not reopen a popup),
+      // not reset to the fresh-shell state.
+      activeCheckId = DISMISS_ID;
       closePopup();
     } else {
       handleCheckUpdate(message);
@@ -183,8 +191,12 @@ function createShell(): ContentShell {
     }
     if (update.status === "done") {
       showResult(update);
-      if (shouldBadge(update)) {
-        for (const img of findImages(update.srcUrl)) addBadge(img, update);
+      // Every click recomputes; a non-ai_signal result must also clear any
+      // badge a previous check left on the matching elements.
+      const action = badgeAction(update);
+      for (const img of findImages(update.srcUrl)) {
+        if (action === "add") addBadge(img, update);
+        else removeBadge(img);
       }
       return;
     }

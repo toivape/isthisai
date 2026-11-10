@@ -100,6 +100,11 @@ async function runCheck(input: {
   const checkId = crypto.randomUUID();
 
   if (!permissionGranted) {
+    // Establish the check in the frame first: a failed update with an
+    // unknown checkId is dropped by the stale-update guard, and a live
+    // content script would swallow the denial message otherwise.
+    const checking: CheckUpdate = { type: "checkUpdate", checkId, srcUrl, status: "checking" };
+    await chrome.tabs.sendMessage(tabId, checking, { frameId }).catch(() => undefined);
     await notifyFailed(tabId, frameId, checkId, srcUrl, { code: "permission_denied" });
     return;
   }
