@@ -24,6 +24,10 @@ function copyExtensionFiles(): Plugin {
       mkdirSync("dist/_locales", { recursive: true });
       cpSync("manifest.json", "dist/manifest.json");
       cpSync("_locales", "dist/_locales", { recursive: true });
+      // c2pa-wasm: the wasm is not bundled (Vite would inline it as a data URL
+      // or asset import); the worker loads it from the extension bundle via
+      // chrome.runtime.getURL("c2pa.wasm") (PLAN §2 loader recipe).
+      cpSync("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm", "dist/c2pa.wasm");
     },
   };
 }
