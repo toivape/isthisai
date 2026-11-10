@@ -144,7 +144,7 @@ type KeyStatus = { type: "keyStatus" };                                     // r
 Storage:
 - `chrome.storage.local`: `{ apiKey?: string }`. The worker calls `chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })` on every start, so content scripts cannot read it. The options page writes or clears the key and never reads it back.
 - `chrome.storage.session`:
-  - `check:<checkId>`: `{ checkId, srcUrl, frameUrl, tabId, frameId, imageHash, mediaType, size }`, written when the local check finishes.
+  - `check:<checkId>`: `{ checkId, srcUrl, frameUrl, tabId, frameId, imageHash, mediaType, size }`, written when the local check finishes. A `data:` `srcUrl` is stored with its payload removed (`data:<media>,`) — the payload is the image itself and would otherwise count as cached bytes and count against the 10 MiB session quota. The upload flow re-reads `data:` images from the page like `blob:` ones (#16).
   - `result:<imageHash>`: `CheckResult`.
 
 ### Tech choices
@@ -381,6 +381,7 @@ Not an AI signal (show details in the popup, no TÄ):
 24. M2: start a check on a slow image, then check another: the first result never replaces the second popup.
 25. M2: an image flagged earlier whose recheck is `incomplete` keeps its TÄ badge; a recheck that finds no signal removes it.
 19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
+26. M3 (#16): with the extension loaded, check the same image twice in one browser session and confirm the session cache is populated (`chrome.storage.session` in the worker DevTools) and cleared after a browser restart; entries must never contain image bytes.
 
 ---
 

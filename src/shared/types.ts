@@ -104,6 +104,7 @@ export interface ApiKeyStorage {
 // chrome.storage.session keys, worker only
 export interface CheckRecord {
   checkId: string;
+  // A data: URL is stored without its payload, so it does not identify the image.
   srcUrl: string;
   frameUrl: string;
   tabId: number;
@@ -111,6 +112,14 @@ export interface CheckRecord {
   imageHash: string;
   mediaType: string;
   size: number;
+}
+
+export function isCheckRecord(value: unknown): value is CheckRecord {
+  if (!isObject(value)) return false;
+  if (!hasString(value, "checkId") || !hasString(value, "srcUrl") || !hasString(value, "frameUrl")) return false;
+  if (!hasString(value, "imageHash") || !hasString(value, "mediaType")) return false;
+  if (typeof value.tabId !== "number" || typeof value.frameId !== "number" || typeof value.size !== "number") return false;
+  return true;
 }
 
 export const CHECK_KEY_PREFIX = "check:";
