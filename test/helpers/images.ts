@@ -52,6 +52,66 @@ function minimalPng(): Uint8Array {
 
 export { minimalPng };
 
+function le32(value: number): Uint8Array {
+  return Uint8Array.from([value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff]);
+}
+
+// ---- XMP container builders (PLAN §8: inputs are built in code). One packet,
+// four containers, to prove the scanner is container-blind. Byte layouts are
+// the standard XMP carriers; the scanner only looks at the raw bytes.
+
+const XMP_NAMESPACE = "http://ns.adobe.com/xap/1.0/";
+
+// JPEG: SOI, one APP1 segment (namespace NUL packet), EOI.
+export function jpegWithXmpPacket(packet: string): Uint8Array {
+  const body = concat([new TextEncoder().encode(XMP_NAMESPACE), new Uint8Array([0]), new TextEncoder().encode(packet)]);
+  const length = body.length + 2; // the length field counts itself
+  return concat([
+    Uint8Array.from([0xff, 0xd8]),
+    Uint8Array.from([0xff, 0xe1, (length >>> 8) & 0xff, length & 0xff]),
+    body,
+    Uint8Array.from([0xff, 0xd9]),
+  ]);
+}
+
+// PNG: uncompressed iTXt chunk (keyword "XML:com.adobe.xmp").
+export function pngWithXmpPacket(packet: string): Uint8Array {
+  const head = new TextEncoder().encode("XML:com.adobe.xmp\0\0\0\0\0");
+  return concat([
+    PNG_SIGNATURE,
+    pngChunk("IHDR", new Uint8Array([1, 0, 1, 0, 8, 2, 0, 0, 0])),
+    pngChunk("iTXt", concat([head, new TextEncoder().encode(packet)])),
+    pngChunk("IDAT", new Uint8Array(deflateSync(new Uint8Array([0, 0xff, 0x00, 0x00])))),
+    pngChunk("IEND", new Uint8Array(0)),
+  ]);
+}
+
+// WebP: RIFF/WEBP with an "XMP " chunk (padded to even length per RIFF).
+export function webpWithXmpPacket(packet: string): Uint8Array {
+  const data = new TextEncoder().encode(packet);
+  const pad = data.length % 2 === 1 ? new Uint8Array([0]) : new Uint8Array(0);
+  const chunk = concat([new TextEncoder().encode("XMP "), le32(data.length), data, pad]);
+  const riffSize = 4 + chunk.length;
+  return concat([new TextEncoder().encode("RIFF"), le32(riffSize), new TextEncoder().encode("WEBP"), chunk]);
+}
+
+// GIF: application extension 0x21 0xFF, block size 0x0B, "XMP DataXMP", the
+// packet, the Adobe magic trailer (0x01 then descending 0xFF..0x00) and the
+// 0x00 terminator. The packet sits contiguously after the 11-byte app id; the
+// magic trailer is required — exiftool rejects a GIF that lacks it.
+export function gifWithXmpPacket(packet: string): Uint8Array {
+  const header = Uint8Array.from([0x21, 0xff, 0x0b, ...new TextEncoder().encode("XMP DataXMP")]);
+  const trailer = Uint8Array.from([0x01, ...Array.from({ length: 256 }, (_, i) => 255 - i)]);
+  return concat([
+    new TextEncoder().encode("GIF89a"),
+    Uint8Array.from([0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]),
+    header,
+    new TextEncoder().encode(packet),
+    trailer,
+    Uint8Array.from([0x00, 0x3b]),
+  ]);
+}
+
 // PNG with an XMP packet in an iTXt chunk; used to point dcterms:provenance
 // at a remote manifest URL.
 export function pngWithXmpProvenance(url: string): Uint8Array {
