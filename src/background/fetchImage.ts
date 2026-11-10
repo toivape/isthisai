@@ -8,9 +8,8 @@ import { decodeBase64, encodeBase64 } from "../shared/base64";
 import { FETCH_DEADLINE_MS, MAX_BLOB_BYTES, MAX_IMAGE_BYTES } from "../shared/limits";
 import type { CheckError, ReadBlob, ReadBlobReply } from "../shared/types";
 
-// Brave's <img> request Accept value; the owner copies the exact string from
-// DevTools into the PR that wires this into the worker.
-export const IMAGE_ACCEPT = "image/avif,image/jxl,image/png,image/webp,image/*;q=0.8,*/*;q=0.5";
+// Brave's <img> request Accept value, copied from DevTools (Network, Img).
+export const IMAGE_ACCEPT = "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
 
 export type ImageBytes = { kind: "bytes"; bytes: Uint8Array; mediaType: string } | { kind: "error"; error: CheckError };
 
