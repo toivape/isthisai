@@ -376,6 +376,10 @@ Not an AI signal (show details in the popup, no TÄ):
 19. M2: right-click a `blob:` image (e.g. canvas `toBlob` → `<img src=blob:…>`) twice in a row on the same page: the first check reads the blob (no `fetch_failed`), and the worker logs one `image collected` line per check (no duplicate reads from stacked listeners).
 20. M2: decline the permission prompt on a cross-origin image: the extension window opens with the localized "access not allowed" text (no content script exists yet). Block or break an image download after injection: the in-page popup shows the localized error instead of "Checking…". Then check an image on a restricted page (e.g. the Web Store) with that result window still open: it switches to the checking view instead of keeping the old permission error.
 21. M2: right-click an image inside a cross-origin iframe (including a `data:` image there): the permission prompt appears once, then the in-page popup shows in that frame.
+22. M2: decline-then-allow cycle: after granting `<all_urls>` once, a second cross-origin image click shows no second prompt (measures the "request resolves true silently when already granted" claim).
+23. M2: click the TÄ badge after dismissing the result popup: headline, claimed issuer (a name, not a literal `$1`) and the "no signal does not mean human-made" caveat all reappear.
+24. M2: start a check on a slow image, then check another: the first result never replaces the second popup.
+25. M2: an image flagged earlier whose recheck is `incomplete` keeps its TÄ badge; a recheck that finds no signal removes it.
 19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
 
 ---

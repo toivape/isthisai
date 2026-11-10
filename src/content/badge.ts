@@ -19,10 +19,18 @@ export function shouldBadge(update: CheckUpdate): boolean {
 }
 
 // A recheck recomputes the verdict on every click (no cache until #20), so a
-// done update with a non-ai_signal verdict must drop any badge the element
-// still carries from an earlier check (stale TÄ would reopen the old result).
-export type BadgeAction = "add" | "remove";
+// no_signal result drops a badge left by an earlier check (stale TÄ would
+// reopen the old result). An incomplete check established nothing, so it
+// leaves an earlier badge alone.
+export type BadgeAction = "add" | "remove" | "keep";
 
 export function badgeAction(update: Extract<CheckUpdate, { status: "done" }>): BadgeAction {
-  return update.result.verdict === "ai_signal" ? "add" : "remove";
+  switch (update.result.verdict) {
+    case "ai_signal":
+      return "add";
+    case "no_signal":
+      return "remove";
+    case "incomplete":
+      return "keep";
+  }
 }

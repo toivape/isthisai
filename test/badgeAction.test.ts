@@ -32,7 +32,7 @@ describe("badgeAction", () => {
     expect(badgeAction(done("no_signal"))).toBe("remove");
   });
 
-  test("incomplete removes an existing badge", () => {
-    expect(badgeAction(done("incomplete"))).toBe("remove");
+  test("incomplete keeps an existing badge (a failed recheck must not hide an earlier AI signal)", () => {
+    expect(badgeAction(done("incomplete"))).toBe("keep");
   });
 });

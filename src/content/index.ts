@@ -191,12 +191,12 @@ function createShell(): ContentShell {
     }
     if (update.status === "done") {
       showResult(update);
-      // Every click recomputes; a non-ai_signal result must also clear any
-      // badge a previous check left on the matching elements.
       const action = badgeAction(update);
-      for (const img of findImages(update.srcUrl)) {
-        if (action === "add") addBadge(img, update);
-        else removeBadge(img);
+      if (action !== "keep") {
+        for (const img of findImages(update.srcUrl)) {
+          if (action === "add") addBadge(img, update);
+          else removeBadge(img);
+        }
       }
       return;
     }

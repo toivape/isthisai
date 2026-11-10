@@ -142,31 +142,23 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   const mainFrameUrl = tab.url ?? "";
   const frameUrl = info.frameUrl ?? mainFrameUrl;
 
+  const start = (permissionGranted: boolean): void => {
+    void runCheck({ tabId, frameId, srcUrl, mainFrameUrl, frameUrl, permissionGranted }).catch((error: unknown) => {
+      console.error("check failed", error);
+    });
+  };
+
   // permissions.request must run synchronously here, while the menu click's
   // user gesture is live: any await before it drops the gesture ("This
   // function must be called during a user gesture"; measured by the owner in
   // Brave, PLAN §4 step 1). An already-granted permission resolves request()
   // true without prompting, so the URL analysis alone decides.
-  let permissionGranted = true;
-  if (needsPermissionRequest(mainFrameUrl, frameUrl, srcUrl)) {
-    permissionGranted = false; // awaited below, but the call itself is synchronous
-    void chrome.permissions
-      .request({ origins: ["<all_urls>"] })
-      .then((granted) => {
-        void runCheck({ tabId, frameId, srcUrl, mainFrameUrl, frameUrl, permissionGranted: granted }).catch((error: unknown) => {
-          console.error("check failed", error);
-        });
-      })
-      .catch((error: unknown) => {
-        console.error("permission request failed", error);
-        void runCheck({ tabId, frameId, srcUrl, mainFrameUrl, frameUrl, permissionGranted: false }).catch((error: unknown) => {
-          console.error("check failed", error);
-        });
-      });
+  if (!needsPermissionRequest(mainFrameUrl, frameUrl, srcUrl)) {
+    start(true);
     return;
   }
-
-  void runCheck({ tabId, frameId, srcUrl, mainFrameUrl, frameUrl, permissionGranted }).catch((error: unknown) => {
-    console.error("check failed", error);
+  chrome.permissions.request({ origins: ["<all_urls>"] }).then(start, (error: unknown) => {
+    console.error("permission request failed", error);
+    start(false);
   });
 });
