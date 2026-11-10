@@ -2,6 +2,12 @@
 // bytes for the packet markers, so JPEG (APP1), PNG (uncompressed iTXt), WebP
 // and GIF all work the same way. No XMP library. Compressed PNG text chunks
 // are not read (documented limitation, PLAN §3 / §9 M7).
+//
+// Known limits (regex scan, not an XML parser):
+// - Only the conventional prefixes Iptc4xmpExt: and xmp: are recognised.
+// - UTF-16 packets are not decoded (reported as not_detected).
+// - The attribute form can match the same text inside another property's value.
+// - A "</x:xmpmeta>" inside a comment ends the packet early.
 
 import type { CheckResult } from "../shared/types";
 
@@ -70,7 +76,7 @@ export function scanXmp(bytes: Uint8Array): LocalXmp {
   const result: LocalXmp = { state: "not_detected" };
 
   const sourceType = propertyValue(packet, DIGITAL_SOURCE_RESOURCE, DIGITAL_SOURCE_ELEM, DIGITAL_SOURCE_ATTR);
-  if (sourceType !== undefined) {
+  if (sourceType) {
     if (AI_SOURCE_SUFFIXES.some((suffix) => sourceType.endsWith(suffix))) {
       result.state = "detected";
     } else {

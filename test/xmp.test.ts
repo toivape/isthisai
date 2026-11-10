@@ -175,6 +175,11 @@ describe("scanXmp: XML serialization forms", () => {
     expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({ state: "not_detected", digitalSourceType: CAPTURE } satisfies LocalXmp);
   });
 
+  test("an empty DigitalSourceType value records nothing", () => {
+    expect(scanXmp(jpegWithXmpPacket(attributePacket("")))).toEqual(NOT_DETECTED);
+    expect(scanXmp(jpegWithXmpPacket(elementPacket("")))).toEqual(NOT_DETECTED);
+  });
+
   test("a CDATA-wrapped element value is data, not markup", () => {
     const packet = elementPacket(`<![CDATA[${TRAINED}]]>`);
     expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(DETECTED);
