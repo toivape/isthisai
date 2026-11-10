@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { readC2pa, mapC2paError, mapC2paStore } from "../src/background/c2pa";
 import type { LocalC2pa } from "../src/shared/types";
-import { minimalGif, minimalPng, minimalWebp, pngWithXmpProvenance } from "./helpers/images";
+import { minimalGif, minimalWebp, pngWithXmpProvenance } from "./helpers/images";
 
 const CTX_GATE = '{"verify":{"remote_manifest_fetch":false,"ocsp_fetch":false}}';
 const WASM_BYTES = readFileSync("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm");
@@ -132,6 +132,16 @@ describe("mapC2paStore", () => {
       claimedModel: "ChatGPT / gpt-image",
       generatedAt: "2026-01-01T00:00:00Z",
     } satisfies LocalC2pa);
+  });
+
+  test("string softwareAgent is used as is for claimedModel", () => {
+    const s = store("m", {
+      m: manifest({
+        label: "m",
+        actions: [{ action: "c2pa.created", softwareAgent: "Acme Imager 2.1" }],
+      }),
+    });
+    expect(mapC2paStore(s).claimedModel).toBe("Acme Imager 2.1");
   });
 
   test("camera manifest without AI actions", () => {
