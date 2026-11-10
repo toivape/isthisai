@@ -258,6 +258,36 @@ describe("runCheckSteps: cache (#20)", () => {
     expect(sets).toEqual([]);
   });
 
+  test("a rejecting store still sends done: caching is best-effort", async () => {
+    // chrome.storage.session rejects ("Session storage quota bytes exceeded").
+    // Losing the cache must not cost the user their result.
+    const store: CacheStore = {
+      get: async () => undefined,
+      set: async () => {
+        throw new Error("Session storage quota bytes exceeded");
+      },
+    };
+    const fetchImpl = vi.fn(async () => pngResponse());
+    const { deps, updates } = fakeDeps({ fetchImpl, store });
+    const outcome = await runCheckSteps(deps, { ...POSITION, srcUrl: "https://page.example/i.png", checkId: "c1" });
+    expect(updates.sent.map((u) => u.status)).toEqual(["checking", "done"]);
+    expect(outcome.kind).toBe("done");
+  });
+
+  test("a store that rejects only on read is also survived", async () => {
+    const store: CacheStore = {
+      get: async () => {
+        throw new Error("session storage unavailable");
+      },
+      set: async () => {},
+    };
+    const fetchImpl = vi.fn(async () => pngResponse());
+    const { deps, updates } = fakeDeps({ fetchImpl, store });
+    const outcome = await runCheckSteps(deps, { ...POSITION, srcUrl: "https://page.example/i.png", checkId: "c1" });
+    expect(updates.sent.map((u) => u.status)).toEqual(["checking", "done"]);
+    expect(outcome.kind).toBe("done");
+  });
+
   test("the check record is stored before the done update, on the payload-free data: URL", async () => {
     const { store, sets } = memoryStore();
     const png = minimalPng();
