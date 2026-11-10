@@ -241,7 +241,7 @@ export const RULES: Record<PerFileRuleId, Rule> = {
 
 export function ruleViolations(files: RepoFile[]): Violation[] {
   return files.flatMap((file) =>
-    (Object.values(RULES) as Rule[]).flatMap((check) => check(file.path, file.content)),
+    Object.values(RULES).flatMap((check) => check(file.path, file.content)),
   );
 }
 

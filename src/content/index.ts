@@ -209,7 +209,9 @@ function createShell(): ContentShell {
   chrome.runtime.onMessage.addListener(handleMessage);
 
   // readBlob is request/response: the listener must return the reply promise
-  // synchronously for the worker's sendMessage to settle.
+  // synchronously for the worker's sendMessage to settle. This untyped chrome
+  // overload expects void, but returning the promise is the MV3 contract.
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   chrome.runtime.onMessage.addListener((incoming: unknown): Promise<ReadBlobReply> | undefined => {
     if (!isReadBlob(incoming)) return undefined;
     return readBlobInPage(incoming.url);

@@ -310,7 +310,7 @@ describe("collectImage", () => {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     const fetchImpl = vi.fn();
     const collected = await collectImage(`data:image/png;base64,${PNG_1PX}`, {
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+      fetchImpl,
       readBlob: noBlob,
     });
     expect(collected.kind).toBe("image");

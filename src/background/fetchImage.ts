@@ -165,7 +165,7 @@ export async function collectImage(url: string, deps: CollectImageDeps): Promise
   if (url.startsWith("data:")) {
     bytes = decodeDataUrl(url);
   } else if (url.startsWith("blob:")) {
-    const reply = await deps.readBlob(url).catch(() => ({ ok: false }) as ReadBlobReply);
+    const reply = await deps.readBlob(url).catch((): ReadBlobReply => ({ ok: false }));
     if (!reply.ok) return { kind: "error", error: { code: reply.reason === "too_large" ? "too_large" : "fetch_failed" } };
     bytes = decodeBase64WithLimit(reply.base64, MAX_BLOB_BYTES);
   } else {
