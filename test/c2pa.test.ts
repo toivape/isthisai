@@ -18,6 +18,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  expect(fetchSpy).not.toHaveBeenCalled();
   fetchSpy.mockClear();
 });
 
@@ -144,6 +145,13 @@ describe("mapC2paStore", () => {
     expect(mapC2paStore(s).claimedModel).toBe("Acme Imager 2.1");
   });
 
+  test("actions in a non-C2PA assertion are ignored", () => {
+    const m = manifest({ label: "m", actions: [{ action: "c2pa.created", digitalSourceType: TRAINED }] });
+    (m.assertions as { label: string }[])[0].label = "com.example.custom";
+    expect(mapC2paStore(store("m", { m }))).toMatchObject({ manifest: "present", aiAction: false });
+    expect(mapC2paStore(store("m", { m })).claimedModel).toBeUndefined();
+  });
+
   test("camera manifest without AI actions", () => {
     const s = store("m", {
       m: manifest({
@@ -184,6 +192,18 @@ describe("mapC2paStore", () => {
         label: "child",
         actions: [{ action: "c2pa.created", digitalSourceType: TRAINED }],
       }),
+    });
+    expect(mapC2paStore(s)).toMatchObject({ manifest: "present", aiAction: false });
+  });
+
+  test("ingredient with a failure in ingredientDeltas contributes nothing", () => {
+    const withDelta = {
+      activeManifest: validatedResults.activeManifest,
+      ingredientDeltas: [{ ingredientAssertionURI: "x", validationDeltas: { failure: [{ code: "assertion.dataHash.mismatch" }] } }],
+    };
+    const s = store("parent", {
+      parent: manifest({ label: "parent", ingredients: [v3Ingredient("child", withDelta)] }),
+      child: manifest({ label: "child", actions: [{ action: "c2pa.created", digitalSourceType: TRAINED }] }),
     });
     expect(mapC2paStore(s)).toMatchObject({ manifest: "present", aiAction: false });
   });
@@ -231,6 +251,13 @@ describe("mapC2paError", () => {
     });
   });
 
+  test("marker words inside a RemoteManifestUrl payload do not change the mapping", () => {
+    expect(mapC2paError('C2pa(RemoteManifestUrl("https://example.test/JumbfNotFound"))')).toEqual<LocalC2pa>({
+      manifest: "remote_unfetched",
+      aiAction: false,
+    });
+  });
+
   test("other errors → error", () => {
     expect(mapC2paError('C2pa(InvalidAsset("PNG out of range"))')).toEqual<LocalC2pa>({ manifest: "error", aiAction: false });
     expect(mapC2paError("C2pa(IoError(...))")).toEqual<LocalC2pa>({ manifest: "error", aiAction: false });
@@ -241,6 +268,19 @@ describe("mapC2paError", () => {
 // ---- readC2pa: real wasm against fixtures and built containers ----
 
 describe("readC2pa", () => {
+  test("wasm init failure → error result, and a later call retries", async () => {
+    vi.resetModules();
+    const fresh = await import("../src/background/c2pa");
+    expect(await fresh.readC2pa("image/png", fixture("ai-test-halloween.png"), new Uint8Array(4))).toEqual<LocalC2pa>({
+      manifest: "error",
+      aiAction: false,
+    });
+    expect(await fresh.readC2pa("image/jpeg", fixture("ai-tes-iceland.jpg"), WASM_BYTES)).toEqual<LocalC2pa>({
+      manifest: "absent",
+      aiAction: false,
+    });
+  });
+
   test("halloween fixture: present, AI action, claimed issuer and model", async () => {
     const result = await readC2pa("image/png", fixture("ai-test-halloween.png"), WASM_BYTES);
     expect(result).toEqual({

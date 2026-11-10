@@ -41,11 +41,14 @@ interface ActionLike {
   digitalSourceType?: unknown;
 }
 
+const ACTIONS_LABEL = /^c2pa\.actions(\.v2)?(__\d+)?$/;
+
 function actionsOf(manifest: Record<string, unknown>): ActionLike[] {
   const assertions = manifest.assertions;
   if (!Array.isArray(assertions)) return [];
   return assertions.flatMap((assertion) => {
     if (!isObject(assertion) || !isObject(assertion.data)) return [];
+    if (typeof assertion.label !== "string" || !ACTIONS_LABEL.test(assertion.label)) return [];
     const data = assertion.data;
     // c2pa.actions and c2pa.actions.v2 both carry { actions: [...] }
     if (!Array.isArray(data.actions)) return [];
@@ -67,12 +70,18 @@ function ingredientValidationPassed(validationResults: unknown): boolean {
   const codeOf = (entry: unknown): string => (isObject(entry) && typeof entry.code === "string" ? entry.code : "");
   const success = codes("success").map(codeOf);
   const failures = codes("failure").map(codeOf);
+  const deltaFailures = (Array.isArray(validationResults.ingredientDeltas) ? validationResults.ingredientDeltas : []).flatMap(
+    (delta) => {
+      const failure = isObject(delta) && isObject(delta.validationDeltas) ? delta.validationDeltas.failure : undefined;
+      return Array.isArray(failure) ? failure.map(codeOf) : [];
+    },
+  );
   const tolerated = (code: string): boolean =>
     code === "signingCredential.untrusted" || TOLERATED_FAILURE_PREFIXES.some((prefix) => code.startsWith(prefix));
   return (
     success.includes("claimSignature.validated") &&
     success.includes("claimSignature.insideValidity") &&
-    failures.every(tolerated)
+    [...failures, ...deltaFailures].every(tolerated)
   );
 }
 
@@ -139,8 +148,8 @@ export function mapC2paStore(store: unknown): LocalC2pa {
 
 export function mapC2paError(thrown: unknown): LocalC2pa {
   const message = thrown instanceof Error ? thrown.message : String(thrown);
-  if (message.includes("JumbfNotFound")) return { manifest: "absent", aiAction: false };
-  if (message.includes("RemoteManifestUrl")) return { manifest: "remote_unfetched", aiAction: false };
+  if (message.startsWith("C2pa(JumbfNotFound)")) return { manifest: "absent", aiAction: false };
+  if (message.startsWith("C2pa(RemoteManifestUrl(")) return { manifest: "remote_unfetched", aiAction: false };
   return { manifest: "error", aiAction: false };
 }
 
@@ -149,9 +158,9 @@ export function mapC2paError(thrown: unknown): LocalC2pa {
 // chrome.runtime.getURL("c2pa.wasm") as a URL the glue fetches from the
 // extension bundle; tests pass the raw bytes so no fetch happens at all).
 export async function readC2pa(format: string, bytes: Uint8Array, wasmSource: BufferSource | string): Promise<LocalC2pa> {
-  await ensureWasm(wasmSource);
   let reader: WasmReader | undefined;
   try {
+    await ensureWasm(wasmSource);
     reader = await WasmReader.fromBytes(format, bytes, VERIFY_CONTEXT);
     return mapC2paStore(JSON.parse(reader.json()));
   } catch (thrown: unknown) {
