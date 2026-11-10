@@ -129,3 +129,55 @@ describe("scanXmp: fixtures", () => {
     expect(scanXmp(fixture("ai-test-halloween.png"))).toEqual(NOT_DETECTED);
   });
 });
+
+describe("scanXmp: XML serialization forms", () => {
+  const CAPTURE = "http://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture";
+  const NOT_AI = { state: "not_detected", digitalSourceType: CAPTURE } satisfies LocalXmp;
+
+  test("a commented-out AI element before a real capture property is not detected", () => {
+    const packet =
+      `<x:xmpmeta xmlns:x="adobe:ns:meta/">${RDF}` +
+      `><!-- <Iptc4xmpExt:DigitalSourceType>${TRAINED}</Iptc4xmpExt:DigitalSourceType> -->` +
+      `<Iptc4xmpExt:DigitalSourceType>${CAPTURE}</Iptc4xmpExt:DigitalSourceType></rdf:Description></rdf:RDF></x:xmpmeta>`;
+    expect(scanXmp(new TextEncoder().encode(packet))).toEqual(NOT_AI);
+  });
+
+  test("a commented-out AI attribute before a real capture attribute is not detected", () => {
+    const packet =
+      `<x:xmpmeta xmlns:x="adobe:ns:meta/">${RDF}>` +
+      `<!-- <rdf:Description Iptc4xmpExt:DigitalSourceType="${TRAINED}"/> -->` +
+      `<rdf:Description rdf:about="" Iptc4xmpExt:DigitalSourceType="${CAPTURE}"/></rdf:RDF></x:xmpmeta>`;
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(NOT_AI);
+  });
+
+  test("rdf:resource element form with trainedAlgorithmicMedia is detected", () => {
+    const packet =
+      `<x:xmpmeta xmlns:x="adobe:ns:meta/">${RDF}>` +
+      `<Iptc4xmpExt:DigitalSourceType rdf:resource="${TRAINED}"/></rdf:Description></rdf:RDF></x:xmpmeta>`;
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(DETECTED);
+  });
+
+  test("a numeric character reference in the element value is decoded", () => {
+    const escaped = TRAINED.replace("trained", "&#116;rained");
+    const packet = elementPacket(escaped);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(DETECTED);
+  });
+
+  test("a numeric character reference in the attribute value is decoded", () => {
+    const escaped = TRAINED.replace("trained", "&#x74;rained");
+    const packet = attributePacket(escaped);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(DETECTED);
+  });
+
+  test("a recorded non-AI value is stored decoded, not escaped", () => {
+    const escaped = CAPTURE.replace("Capture", "&#67;apture");
+    const packet = elementPacket(escaped);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({ state: "not_detected", digitalSourceType: CAPTURE } satisfies LocalXmp);
+  });
+
+  test("a CDATA-wrapped element value is data, not markup", () => {
+    const packet = elementPacket(`<![CDATA[${TRAINED}]]>`);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(DETECTED);
+  });
+});
+

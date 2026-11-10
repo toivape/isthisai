@@ -39,8 +39,10 @@ function concat(parts: Uint8Array[]): Uint8Array {
 const PNG_SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 // 1x1 RGB PNG: IHDR + IDAT (filter 0, RGB) + IEND.
+// IHDR is 13 bytes: width(4), height(4), bitDepth, colorType, compression,
+// filter, interlace. A 9-byte payload is invalid (parsers reject the file).
 function minimalPng(): Uint8Array {
-  const ihdr = new Uint8Array([1, 0, 1, 0, 8, 2, 0, 0, 0]);
+  const ihdr = new Uint8Array([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
   const idat = new Uint8Array(deflateSync(new Uint8Array([0, 0xff, 0x00, 0x00])));
   return concat([
     PNG_SIGNATURE,
@@ -79,7 +81,7 @@ export function pngWithXmpPacket(packet: string): Uint8Array {
   const head = new TextEncoder().encode("XML:com.adobe.xmp\0\0\0\0\0");
   return concat([
     PNG_SIGNATURE,
-    pngChunk("IHDR", new Uint8Array([1, 0, 1, 0, 8, 2, 0, 0, 0])),
+    pngChunk("IHDR", new Uint8Array([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0])),
     pngChunk("iTXt", concat([head, new TextEncoder().encode(packet)])),
     pngChunk("IDAT", new Uint8Array(deflateSync(new Uint8Array([0, 0xff, 0x00, 0x00])))),
     pngChunk("IEND", new Uint8Array(0)),
@@ -123,7 +125,7 @@ export function pngWithXmpProvenance(url: string): Uint8Array {
   const head = new TextEncoder().encode("XML:com.adobe.xmp\0\0\0\0\0");
   return concat([
     PNG_SIGNATURE,
-    pngChunk("IHDR", new Uint8Array([1, 0, 1, 0, 8, 2, 0, 0, 0])),
+    pngChunk("IHDR", new Uint8Array([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0])),
     pngChunk("iTXt", concat([head, new TextEncoder().encode(xmp)])),
     pngChunk("IDAT", new Uint8Array(deflateSync(new Uint8Array([0, 0xff, 0x00, 0x00])))),
     pngChunk("IEND", new Uint8Array(0)),
