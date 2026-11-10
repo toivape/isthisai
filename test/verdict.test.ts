@@ -11,7 +11,7 @@ function result(overrides: {
   return {
     imageHash: "hash",
     mediaType: "image/png",
-    verdict: "incomplete", // recomputeVerdict overwrites this
+    verdict: "incomplete",
     localC2pa: { manifest: "absent", aiAction: false, ...overrides.localC2pa },
     localXmp: { state: "not_detected", ...overrides.localXmp },
     openai: overrides.openai ?? { state: "not_checked" },
