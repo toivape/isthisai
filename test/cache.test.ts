@@ -156,6 +156,14 @@ describe("data: URLs never put their payload in the cache", () => {
     expect((sets[0].value as CheckRecord).srcUrl).toBe("data:image/svg+xml,");
   });
 
+  test("a malformed data: URL with no comma is stored without its body", async () => {
+    const { store, sets } = fakeStore();
+    await putCheck(store, record({ srcUrl: `data:image/png;base64${PAYLOAD}` }));
+    const stored = sets[0].value as CheckRecord;
+    expect(stored.srcUrl).toBe("data:");
+    expect(JSON.stringify(stored)).not.toContain(PAYLOAD);
+  });
+
   test("a 1 MiB image stays a tiny record (session quota guard)", async () => {
     const { store, sets } = fakeStore();
     const big = `data:image/png;base64,${"A".repeat(1024 * 1024)}`;

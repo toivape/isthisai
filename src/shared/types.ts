@@ -104,6 +104,7 @@ export interface ApiKeyStorage {
 // chrome.storage.session keys, worker only
 export interface CheckRecord {
   checkId: string;
+  // A data: URL is stored without its payload, so it does not identify the image.
   srcUrl: string;
   frameUrl: string;
   tabId: number;

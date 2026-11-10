@@ -144,7 +144,7 @@ type KeyStatus = { type: "keyStatus" };                                     // r
 Storage:
 - `chrome.storage.local`: `{ apiKey?: string }`. The worker calls `chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })` on every start, so content scripts cannot read it. The options page writes or clears the key and never reads it back.
 - `chrome.storage.session`:
-  - `check:<checkId>`: `{ checkId, srcUrl, frameUrl, tabId, frameId, imageHash, mediaType, size }`, written when the local check finishes. A `data:` `srcUrl` is stored with its payload removed (`data:<media>,`) — the payload is the image itself and would otherwise count as cached bytes and count against the 10 MiB session quota (measured 2026-11-10). The upload flow re-reads `data:` images from the page like `blob:` ones (#16).
+  - `check:<checkId>`: `{ checkId, srcUrl, frameUrl, tabId, frameId, imageHash, mediaType, size }`, written when the local check finishes. A `data:` `srcUrl` is stored with its payload removed (`data:<media>,`) — the payload is the image itself and would otherwise count as cached bytes and count against the 10 MiB session quota. The upload flow re-reads `data:` images from the page like `blob:` ones (#16).
   - `result:<imageHash>`: `CheckResult`.
 
 ### Tech choices
