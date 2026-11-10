@@ -4,11 +4,13 @@ import {
   decodeBase64WithLimit,
   decodeDataUrl,
   fetchImageBytes,
+  readBlobRequest,
   sha256Hex,
 } from "../src/background/fetchImage";
 import { needsPermissionRequest, originsToCheck } from "../src/background/permissions";
 import { decodeBase64, encodeBase64 } from "../src/shared/base64";
 import { MAX_BLOB_BYTES } from "../src/shared/limits";
+import { isReadBlob } from "../src/shared/types";
 import { minimalPng } from "./helpers/images";
 
 const KIB = 1024;
@@ -270,5 +272,20 @@ describe("collectImage", () => {
       readBlob: async () => ({ ok: true, base64: tooLarge }),
     });
     expect(oversized).toEqual({ kind: "error", error: { code: "too_large" } });
+  });
+
+  test("blob: too_large reply from the page maps to too_large", async () => {
+    const collected = await collectImage("blob:https://page.example/uuid", {
+      readBlob: async () => ({ ok: false, reason: "too_large" }),
+    });
+    expect(collected).toEqual({ kind: "error", error: { code: "too_large" } });
+  });
+});
+
+describe("readBlobRequest", () => {
+  test("builds a message the content script's guard accepts", () => {
+    const message = readBlobRequest("check-1", "blob:https://page.example/uuid");
+    expect(isReadBlob(message)).toBe(true);
+    expect(message).toEqual({ type: "readBlob", checkId: "check-1", url: "blob:https://page.example/uuid" });
   });
 });

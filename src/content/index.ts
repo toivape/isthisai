@@ -162,15 +162,14 @@ function createShell(): ContentShell {
   // instance (including this listener) instead of adding a duplicate.
   chrome.runtime.onMessage.addListener(handleMessage);
 
+  // readBlob is request/response: the listener must return the reply promise
+  // synchronously for the worker's sendMessage to settle.
+  chrome.runtime.onMessage.addListener((incoming: unknown): Promise<ReadBlobReply> | undefined => {
+    if (!isReadBlob(incoming)) return undefined;
+    return readBlobInPage(incoming.url);
+  });
+
   return { handleCheckUpdate };
 }
-
-// readBlob is request/response: the listener must return the reply promise
-// synchronously for the worker's sendMessage to settle. Registered once at
-// module level; installOnce already guards against double injection.
-chrome.runtime.onMessage.addListener((incoming: unknown): Promise<ReadBlobReply> | undefined => {
-  if (!isReadBlob(incoming)) return undefined;
-  return readBlobInPage(incoming.url);
-});
 
 void installOnce(INSTANCE_KEY, createShell);

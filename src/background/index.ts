@@ -4,7 +4,7 @@
 // kept in module variables.
 
 import type { CheckError, CheckUpdate, DismissPopup, ReadBlobReply } from "../shared/types";
-import { collectImage } from "./fetchImage";
+import { collectImage, readBlobRequest } from "./fetchImage";
 import { needsPermissionRequest } from "./permissions";
 
 const MENU_ID = "check-ai-signals";
@@ -52,9 +52,9 @@ async function openResultWindow(): Promise<void> {
 // Reads a blob: URL in the frame that owns it (only the page can); the reply
 // is base64 (messages are JSON-only). A missing reader (frame not injected)
 // behaves like a revoked blob: fetch_failed.
-async function readBlobInFrame(tabId: number, frameId: number, url: string): Promise<ReadBlobReply> {
+async function readBlobInFrame(tabId: number, frameId: number, checkId: string, url: string): Promise<ReadBlobReply> {
   try {
-    const reply: unknown = await chrome.tabs.sendMessage(tabId, { type: "readBlob", url }, { frameId });
+    const reply: unknown = await chrome.tabs.sendMessage(tabId, readBlobRequest(checkId, url), { frameId });
     if (reply && typeof reply === "object" && "ok" in reply) return reply as ReadBlobReply;
     return { ok: false };
   } catch {
@@ -115,7 +115,7 @@ async function runCheck(input: { tabId: number; frameId: number; srcUrl: string;
   }
 
   const collected = await collectImage(srcUrl, {
-    readBlob: (url) => readBlobInFrame(tabId, frameId, url),
+    readBlob: (url) => readBlobInFrame(tabId, frameId, checkId, url),
   });
 
   if (collected.kind === "error") {

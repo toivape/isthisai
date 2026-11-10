@@ -6,7 +6,7 @@
 import { sniffMediaType } from "./sniff";
 import { decodeBase64, encodeBase64 } from "../shared/base64";
 import { FETCH_DEADLINE_MS, MAX_BLOB_BYTES, MAX_IMAGE_BYTES } from "../shared/limits";
-import type { CheckError, ReadBlobReply } from "../shared/types";
+import type { CheckError, ReadBlob, ReadBlobReply } from "../shared/types";
 
 // Brave's <img> request Accept value; the owner copies the exact string from
 // DevTools into the PR that wires this into the worker.
@@ -115,6 +115,10 @@ export function decodeBase64WithLimit(base64: string, maxBytes: number): ImageBy
   }
 }
 
+export function readBlobRequest(checkId: string, url: string): ReadBlob {
+  return { type: "readBlob", checkId, url };
+}
+
 export type CollectedImage =
   | { kind: "image"; bytes: Uint8Array; mediaType: string; size: number; imageHash: string }
   | { kind: "error"; error: CheckError };
@@ -131,7 +135,7 @@ export async function collectImage(url: string, deps: CollectImageDeps): Promise
     bytes = decodeDataUrl(url);
   } else if (url.startsWith("blob:")) {
     const reply = await deps.readBlob(url).catch(() => ({ ok: false }) as ReadBlobReply);
-    if (!reply.ok) return { kind: "error", error: { code: "fetch_failed" } };
+    if (!reply.ok) return { kind: "error", error: { code: reply.reason === "too_large" ? "too_large" : "fetch_failed" } };
     bytes = decodeBase64WithLimit(reply.base64, MAX_BLOB_BYTES);
   } else {
     bytes = await fetchImageBytes(url, { fetchImpl: deps.fetchImpl });
