@@ -71,12 +71,17 @@ function createShell(): ContentShell {
     popup = undefined;
   }
 
-  function showPopup(headlineKey: string, caveatKey?: string): PopupHandle {
+  function showPopup(headlineKey: string, caveatKey?: string, detail?: string): PopupHandle {
     const overlay = document.createElement("div");
     overlay.className = "isthisai-popup";
     const headline = document.createElement("h1");
     headline.textContent = message(headlineKey);
     overlay.appendChild(headline);
+    if (detail) {
+      const detailEl = document.createElement("p");
+      detailEl.textContent = detail;
+      overlay.appendChild(detailEl);
+    }
     if (caveatKey) {
       const caveat = document.createElement("p");
       caveat.textContent = message(caveatKey);
@@ -156,11 +161,21 @@ function createShell(): ContentShell {
       popup = showPopup(errorMessageKey(update.error.code));
       return;
     }
-    popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
-    if (!shouldBadge(update)) return;
-    for (const img of findImages(update.srcUrl)) {
-      addBadge(img);
+    if (update.status === "done") {
+      // Headline by verdict (hard rule 8: never "real"/"fake"); the claimed
+      // issuer is shown as claimed, signer not verified (no trust list).
+      const headlineKey =
+        update.result.verdict === "ai_signal" ? "popup_headline_ai_signal" : "popup_headline_no_signal";
+      const detail = update.result.localC2pa.claimedIssuer
+        ? message("popup_detail_claimed_issuer", [update.result.localC2pa.claimedIssuer])
+        : undefined;
+      popup = showPopup(headlineKey, "popup_caveat_no_signal", detail);
+      if (shouldBadge(update)) {
+        for (const img of findImages(update.srcUrl)) addBadge(img);
+      }
+      return;
     }
+    popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
   }
 
   // Registered inside the factory so a second injection reuses the whole

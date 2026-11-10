@@ -61,5 +61,11 @@
   },
   "error_unsupported_type": {
     "message": "Tämän tyyppistä kuvaa ei tueta."
+  },
+  "popup_headline_no_signal": {
+    "message": "Tekoälyn merkkiä ei löytynyt"
+  },
+  "popup_detail_claimed_issuer": {
+    "message": "Content Credentials -merkintä: $1 ( väitetty, allekirjoittajaa ei ole vahvistettu)"
   }
 }

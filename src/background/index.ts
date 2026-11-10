@@ -5,7 +5,9 @@
 
 import type { CheckError, CheckUpdate, DismissPopup, ReadBlobReply } from "../shared/types";
 import { resultWindowPath } from "../shared/errors";
-import { collectImage, readBlobRequest } from "./fetchImage";
+import { runCheckSteps } from "./check";
+import { readC2pa } from "./c2pa";
+import { readBlobRequest } from "./fetchImage";
 import { needsPermissionRequest } from "./permissions";
 
 const MENU_ID = "check-ai-signals";
@@ -79,6 +81,13 @@ async function notifyFailed(
   }
 }
 
+// The API key is read only here (hard rule 3) and only to decide whether the
+// OpenAI check is offered; the key itself never leaves the worker.
+async function hasApiKey(): Promise<boolean> {
+  const stored: unknown = await chrome.storage.local.get("apiKey");
+  return typeof (stored as { apiKey?: unknown })?.apiKey === "string" && (stored as { apiKey: string }).apiKey !== "";
+}
+
 async function runCheck(input: {
   tabId: number;
   frameId: number;
@@ -107,40 +116,27 @@ async function runCheck(input: {
     }
   }
 
-  const checking = {
-    type: "checkUpdate",
-    checkId,
-    srcUrl,
-    status: "checking",
-  } satisfies CheckUpdate;
   const dismiss = { type: "dismissPopup" } satisfies DismissPopup;
 
   try {
     await chrome.tabs.sendMessage(tabId, dismiss).catch(() => undefined); // no frame has the script yet
     await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: ["content/index.js"] });
-    await chrome.tabs.sendMessage(tabId, checking, { frameId });
   } catch (error) {
     console.error("injection failed", error);
     await openResultWindow().catch(console.error);
     return;
   }
 
-  const collected = await collectImage(srcUrl, {
-    readBlob: (url) => readBlobInFrame(tabId, frameId, checkId, url),
-  });
-
-  if (collected.kind === "error") {
-    await notifyFailed(tabId, frameId, checkId, srcUrl, collected.error);
-    return;
-  }
-
-  // #17 wires C2PA, verdict and the done update; for now record what the
-  // fetch produced so M2 wiring has the values it needs.
-  console.log("image collected", {
-    mediaType: collected.mediaType,
-    size: collected.size,
-    imageHash: collected.imageHash,
-  });
+  await runCheckSteps(
+    {
+      sendUpdate: (update) => chrome.tabs.sendMessage(tabId, update, { frameId }).catch(() => undefined),
+      readBlob: (url) => readBlobInFrame(tabId, frameId, checkId, url),
+      readC2pa,
+      wasmSource: chrome.runtime.getURL("c2pa.wasm"),
+      hasApiKey,
+    },
+    { checkId, srcUrl },
+  );
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {

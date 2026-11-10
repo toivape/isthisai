@@ -38,6 +38,12 @@
   "popup_headline_ai_signal": {
     "message": "AI signal found"
   },
+  "popup_headline_no_signal": {
+    "message": "No AI signal found"
+  },
+  "popup_detail_claimed_issuer": {
+    "message": "Content Credentials from $1 (claimed, signer not verified)"
+  },
   "popup_caveat_no_signal": {
     "message": "No signal does not mean the image is human-made."
   },
