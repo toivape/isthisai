@@ -1,3 +1,18 @@
+export type OpenAiResultPart =
+  | { state: "not_checked" }
+  | {
+      state: "done";
+      serverConverted: boolean;
+      c2pa: {
+        outcome: "detected" | "not_detected";
+        validation?: "trusted" | "valid" | "invalid" | "not_present";
+        issuer?: string;
+        model?: string;
+        generatedAt?: string;
+      };
+      synthid: { outcome: "detected" | "not_detected"; model?: string; generatedAt?: string };
+    };
+
 export interface CheckResult {
   imageHash: string;
   mediaType: string;
@@ -14,20 +29,7 @@ export interface CheckResult {
     digitalSourceType?: string;
     generatorHint?: string;
   };
-  openai:
-    | { state: "not_checked" }
-    | {
-        state: "done";
-        serverConverted: boolean;
-        c2pa: {
-          outcome: "detected" | "not_detected";
-          validation?: "trusted" | "valid" | "invalid" | "not_present";
-          issuer?: string;
-          model?: string;
-          generatedAt?: string;
-        };
-        synthid: { outcome: "detected" | "not_detected"; model?: string; generatedAt?: string };
-      };
+  openai: OpenAiResultPart;
 }
 
 export type CheckErrorCode =
