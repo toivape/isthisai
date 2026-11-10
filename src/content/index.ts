@@ -7,11 +7,12 @@
 import { isBadgeVisible, shouldBadge } from "./badge";
 import { findImages } from "./findImages";
 import { installOnce } from "./installOnce";
+import { isStaleUpdate, verdictPresentation } from "./presentation";
 import { readBlobInPage } from "./readBlob";
 import { errorMessageKey } from "../shared/errors";
 import { message } from "../shared/i18n";
 import { isCheckUpdate, isDismissPopup, isReadBlob } from "../shared/types";
-import type { ReadBlobReply } from "../shared/types";
+import type { CheckUpdate, ReadBlobReply } from "../shared/types";
 
 // The idempotently-installed UI instance; the shape is local to the shell.
 export interface ContentShell {
@@ -65,18 +66,37 @@ function createShell(): ContentShell {
 
   let popup: PopupHandle | undefined;
   const badges = new Map<HTMLImageElement, HTMLDivElement>();
+  let activeCheckId: string | undefined;
+
+  type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
+
+  function showResult(update: DoneUpdate): void {
+    const { headlineKey, detailKey } = verdictPresentation(update.result.verdict);
+    const issuer = update.result.localC2pa.claimedIssuer;
+    const detail = detailKey
+      ? message(detailKey)
+      : issuer
+        ? message("popup_detail_claimed_issuer", [issuer])
+        : undefined;
+    popup = showPopup(headlineKey, "popup_caveat_no_signal", detail);
+  }
 
   function closePopup(): void {
     popup?.close();
     popup = undefined;
   }
 
-  function showPopup(headlineKey: string, caveatKey?: string): PopupHandle {
+  function showPopup(headlineKey: string, caveatKey?: string, detail?: string): PopupHandle {
     const overlay = document.createElement("div");
     overlay.className = "isthisai-popup";
     const headline = document.createElement("h1");
     headline.textContent = message(headlineKey);
     overlay.appendChild(headline);
+    if (detail) {
+      const detailEl = document.createElement("p");
+      detailEl.textContent = detail;
+      overlay.appendChild(detailEl);
+    }
     if (caveatKey) {
       const caveat = document.createElement("p");
       caveat.textContent = message(caveatKey);
@@ -128,8 +148,8 @@ function createShell(): ContentShell {
   window.addEventListener("scroll", repositionBadges, { capture: true });
   window.addEventListener("resize", repositionBadges);
 
-  function addBadge(img: HTMLImageElement): void {
-    if (badges.has(img)) return;
+  function addBadge(img: HTMLImageElement, update: DoneUpdate): void {
+    badges.get(img)?.remove();
     const badge = document.createElement("div");
     badge.className = "isthisai-badge";
     badge.textContent = "TÄ";
@@ -137,7 +157,7 @@ function createShell(): ContentShell {
     badge.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
       closePopup();
-      popup = showPopup("popup_headline_ai_signal");
+      showResult(update);
     });
     shadow.appendChild(badge);
     positionBadge(badge, img);
@@ -145,22 +165,31 @@ function createShell(): ContentShell {
   }
 
   function handleMessage(message: unknown): void {
-    if (isDismissPopup(message)) closePopup();
-    else handleCheckUpdate(message);
+    if (isDismissPopup(message)) {
+      activeCheckId = undefined;
+      closePopup();
+    } else {
+      handleCheckUpdate(message);
+    }
   }
 
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
+    if (isStaleUpdate(activeCheckId, update)) return;
     closePopup();
     if (update.status === "failed") {
       popup = showPopup(errorMessageKey(update.error.code));
       return;
     }
-    popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
-    if (!shouldBadge(update)) return;
-    for (const img of findImages(update.srcUrl)) {
-      addBadge(img);
+    if (update.status === "done") {
+      showResult(update);
+      if (shouldBadge(update)) {
+        for (const img of findImages(update.srcUrl)) addBadge(img, update);
+      }
+      return;
     }
+    activeCheckId = update.checkId;
+    popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
   }
 
   // Registered inside the factory so a second injection reuses the whole

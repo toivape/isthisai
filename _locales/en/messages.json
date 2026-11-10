@@ -38,6 +38,12 @@
   "popup_headline_ai_signal": {
     "message": "AI signal found"
   },
+  "popup_headline_no_signal": {
+    "message": "No AI signal found"
+  },
+  "popup_detail_claimed_issuer": {
+    "message": "Content Credentials from $1 (claimed, signer not verified)"
+  },
   "popup_caveat_no_signal": {
     "message": "No signal does not mean the image is human-made."
   },
@@ -61,5 +67,11 @@
   },
   "error_unsupported_type": {
     "message": "This image type is not supported."
+  },
+  "popup_headline_incomplete": {
+    "message": "Check incomplete"
+  },
+  "popup_detail_incomplete": {
+    "message": "The image could not be fully checked, so no result can be given."
   }
 }
