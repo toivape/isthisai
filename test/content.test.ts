@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { matchesSrcUrl } from "../src/content/findImages";
+import { findImages, matchesSrcUrl } from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
 import { isBadgeVisible, shouldBadge } from "../src/content/badge";
 import { isStaleUpdate, verdictPresentation, DISMISS_ID } from "../src/content/presentation";
@@ -57,6 +57,76 @@ describe("matchesSrcUrl", () => {
     const blobUrl = "blob:https://example.com/uuid-1";
     expect(matchesSrcUrl(fakeImage({ src: dataUrl, currentSrc: dataUrl }), dataUrl)).toBe(true);
     expect(matchesSrcUrl(fakeImage({ src: blobUrl, currentSrc: blobUrl }), blobUrl)).toBe(true);
+  });
+
+  test("rejects a non-image value and a missing src or currentSrc", () => {
+    // The shell passes whatever `querySelectorAll("img")` yielded, but the
+    // guard must hold for anything: null, a non-string src, a non-string
+    // currentSrc.
+    expect(matchesSrcUrl(null, "https://example.com/a.png")).toBe(false);
+    expect(matchesSrcUrl(undefined, "https://example.com/a.png")).toBe(false);
+    expect(matchesSrcUrl(42, "https://example.com/a.png")).toBe(false);
+    expect(matchesSrcUrl({}, "https://example.com/a.png")).toBe(false);
+    expect(matchesSrcUrl({ src: "https://example.com/a.png" }, "https://example.com/a.png")).toBe(false);
+    expect(matchesSrcUrl({ currentSrc: "https://example.com/a.png" }, "https://example.com/a.png")).toBe(false);
+    expect(matchesSrcUrl({ src: 5, currentSrc: "x" }, "x")).toBe(false);
+  });
+
+  test("an empty src never matches, even against an empty srcUrl", () => {
+    expect(matchesSrcUrl(fakeImage({ src: "", currentSrc: "" }), "")).toBe(true); // currentSrc === srcUrl first
+    expect(matchesSrcUrl(fakeImage({ src: "", currentSrc: "https://example.com/a.png" }), "")).toBe(false);
+  });
+
+  test("an empty src is not resolved against the baseURI into a match", () => {
+    // <img src=""> resolves to the page URL. The guard must reject it before
+    // resolvedSrc turns it into the document URL, which could equal the srcUrl.
+    const img = fakeImage({ src: "", currentSrc: "placeholder", baseURI: "https://example.com/page.html" });
+    expect(matchesSrcUrl(img, "https://example.com/page.html")).toBe(false);
+  });
+
+  test("resolves an absolute src without a baseURI", () => {
+    expect(matchesSrcUrl({ src: "https://example.com/a.png", currentSrc: "other" }, "https://example.com/a.png")).toBe(true);
+  });
+
+  test("falls back to the raw src when it cannot be resolved", () => {
+    // A relative src with no baseURI cannot be made absolute: the raw value is
+    // compared as-is.
+    expect(matchesSrcUrl({ src: "a.png", currentSrc: "other" }, "a.png")).toBe(true);
+    expect(matchesSrcUrl({ src: "a.png", currentSrc: "other" }, "https://example.com/a.png")).toBe(false);
+  });
+});
+
+describe("findImages", () => {
+  // A minimal ParentNode: only querySelectorAll is used.
+  function fakeRoot(imgs: unknown[]): ParentNode {
+    return { querySelectorAll: (selector: string) => (selector === "img" ? imgs : []) } as unknown as ParentNode;
+  }
+
+  test("returns only the images whose src matches, in document order", () => {
+    const target = "https://cdn.example.com/photo.jpg";
+    const other = "https://cdn.example.com/other.jpg";
+    const match1 = fakeImage({ src: target, currentSrc: target });
+    const miss = fakeImage({ src: other, currentSrc: other });
+    const match2 = fakeImage({ src: "placeholder", currentSrc: target });
+    const found = findImages(target, fakeRoot([match1, miss, match2]));
+    expect(found).toEqual([match1, match2]);
+  });
+
+  test("returns an empty array when nothing matches", () => {
+    const root = fakeRoot([fakeImage({ src: "https://example.com/a.png", currentSrc: "https://example.com/a.png" })]);
+    expect(findImages("https://example.com/b.png", root)).toEqual([]);
+  });
+
+  test("queries for img elements specifically", () => {
+    const calls: string[] = [];
+    const root = {
+      querySelectorAll: (selector: string) => {
+        calls.push(selector);
+        return [];
+      },
+    } as unknown as ParentNode;
+    findImages("https://example.com/a.png", root);
+    expect(calls).toEqual(["img"]);
   });
 });
 

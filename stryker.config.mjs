@@ -30,8 +30,8 @@ export default {
     "!src/shared/i18n.ts",
     "!src/shared/limits.ts",
   ],
-  // The gate: exit non-zero under 90%. Baseline measured 2026-11-11: 94.29%
-  // total / 95.8% covered; the remaining survivors are equivalent mutants (see
+  // The gate: exit non-zero under 90%. Baseline measured 2026-11-11: 95.54%
+  // total / 96.5% covered; the remaining survivors are equivalent mutants (see
   // the test files' comments).
   thresholds: { high: 90, low: 85, break: 90 },
   timeoutMS: 30000,
