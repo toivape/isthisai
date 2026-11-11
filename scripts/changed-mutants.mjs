@@ -52,21 +52,42 @@ export function isMutable(path, patterns = base.mutate) {
   return positives.some((p) => globToRegExp(p).test(path));
 }
 
-/** Every module specifier a source file imports (static, side-effect, dynamic).
- * Type-only imports are ignored: they carry no runtime behaviour, and following
- * them would drag shared type modules (e.g. src/shared/types.ts) into a run for
- * every changed test file. */
+/** Every module specifier a source file imports.
+ *
+ * Only import statements are matched, never import-looking text inside a string
+ * literal (a test may contain `'import x from "./a"'` as data). A real import
+ * statement starts a line — or is the `} from "..."` tail of a multi-line one —
+ * which is what the anchoring below relies on. Skips `import type` (no runtime
+ * behaviour; following it would drag src/shared/types.ts into every run). */
 export function importSpecifiers(source) {
   const specifiers = new Set();
-  const pattern = /(?:from|import)\s*(?:\(\s*)?["']([^"']+)["']/g;
-  for (const match of source.matchAll(pattern)) {
-    // `import type x from "..."` is type-only; a value import of a type is not
-    // distinguishable syntactically, so only the explicit form is skipped.
-    const before = source.slice(Math.max(0, match.index - 40), match.index);
-    if (/import\s+type\s[^;]*$/.test(before)) continue;
-    specifiers.add(match[1]);
+  const lines = source.split("\n");
+  for (let index = 0; index < lines.length; index++) {
+    const trimmed = lines[index].trimStart();
+    if (/^import\s+type\b/.test(trimmed)) continue;
+    // A statement start: `import ...` or a `} from "..."` closing a multi-line import.
+    const isImportStart = /^import\b/.test(trimmed) || (trimmed.startsWith("}") && trimmed.includes(" from "));
+    const isDynamicImport = /^(?:const|let|var)\s+\w+\s*=\s*(?:await\s+)?import\(/.test(trimmed);
+    if (!isImportStart && !isDynamicImport) continue;
+    const specifier = findSpecifier(trimmed, lines, index);
+    if (specifier !== undefined) specifiers.add(specifier);
   }
   return [...specifiers];
+}
+
+// The module specifier of one import statement, whether it fits on the line or
+// continues onto following lines (`import {\n x\n} from "m"`).
+function findSpecifier(firstLine, lines, index) {
+  let text = firstLine;
+  let scan = index;
+  while (!text.includes("from ") && !/["']/.test(text.replace(/^import\s*\(?\s*/, "")) && scan + 1 < lines.length) {
+    scan++;
+    text += " " + lines[scan].trim();
+  }
+  const quoted = text.match(/["']([^"']+)["']/g);
+  if (!quoted || quoted.length === 0) return undefined;
+  const last = quoted[quoted.length - 1];
+  return last.slice(1, -1);
 }
 
 /**

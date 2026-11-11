@@ -68,6 +68,11 @@ describe("importSpecifiers", () => {
     expect(importSpecifiers(source)).toEqual(["./a", "../b", "./side-effect", "./c"]);
   });
 
+  test("reads the specifier of a multi-line import from its closing line", () => {
+    const source = ["import {", "  a,", "  b,", '} from "../src/background/xmp";'].join("\n");
+    expect(importSpecifiers(source)).toEqual(["../src/background/xmp"]);
+  });
+
   test("skips type-only imports so shared type modules are not dragged in", () => {
     const source = [
       'import type { CheckResult } from "../src/shared/types";',
@@ -77,8 +82,14 @@ describe("importSpecifiers", () => {
     expect(importSpecifiers(source)).toEqual(["../src/shared/other", "../src/background/xmp"]);
   });
 
-  test("ignores non-import strings", () => {
-    expect(importSpecifiers('const x = "from ./nope"; console.log("import \'x\'");')).not.toContain("./nope");
+  test("ignores import-looking text inside string literals used as test data", () => {
+    // A test that asserts on import strings must not be read as importing them.
+    const source = [
+      'import { describe } from "vitest";',
+      "const readFile = () => 'import { scanXmp } from \"../src/background/xmp\";';",
+      "expect(selectMutants([\"test/x.test.ts\"], () => 'import { b } from \"../b\";')).toEqual([]);",
+    ].join("\n");
+    expect(importSpecifiers(source)).toEqual(["vitest"]);
   });
 });
 
