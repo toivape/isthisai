@@ -4,12 +4,13 @@ import {
   decodeBase64WithLimit,
   decodeDataUrl,
   fetchImageBytes,
+  IMAGE_ACCEPT,
   readBlobRequest,
   sha256Hex,
 } from "../src/background/fetchImage";
 import { needsPermissionRequest, originsToCheck } from "../src/background/permissions";
 import { decodeBase64, encodeBase64 } from "../src/shared/base64";
-import { MAX_BLOB_BYTES } from "../src/shared/limits";
+import { MAX_BLOB_BYTES, MAX_IMAGE_BYTES } from "../src/shared/limits";
 import { isReadBlob } from "../src/shared/types";
 import { minimalPng } from "./helpers/images";
 
@@ -64,11 +65,32 @@ describe("decodeBase64WithLimit", () => {
     expect(result.kind).toBe("bytes");
     if (result.kind !== "bytes") return;
     expect([...result.bytes]).toEqual([1, 2, 3]);
+    expect(result.mediaType).toBe("");
   });
 
   test("rejects a payload over the limit with too_large", () => {
     const big = encodeBase64(new Uint8Array(MAX_BLOB_BYTES + 1).fill(0));
     expect(decodeBase64WithLimit(big, MAX_BLOB_BYTES)).toEqual({ kind: "error", error: { code: "too_large" } });
+  });
+
+  test("a payload exactly at the limit passes, one byte over is too_large", () => {
+    const atLimit = encodeBase64(new Uint8Array(1000).fill(0));
+    expect(decodeBase64WithLimit(atLimit, 1000).kind).toBe("bytes");
+    const over = encodeBase64(new Uint8Array(1001).fill(0));
+    expect(decodeBase64WithLimit(over, 1000)).toEqual({ kind: "error", error: { code: "too_large" } });
+  });
+
+  test("the padded length estimate counts the stripped '=' bytes", () => {
+    // "YQ==" decodes to 1 byte; the limit must compare decoded size, so a
+    // limit of 1 accepts it and a limit of 0 rejects it.
+    expect(decodeBase64WithLimit("YQ==", 1).kind).toBe("bytes");
+    expect(decodeBase64WithLimit("YQ==", 0)).toEqual({ kind: "error", error: { code: "too_large" } });
+    // "YWI=" decodes to 2 bytes (single '=').
+    expect(decodeBase64WithLimit("YWI=", 2).kind).toBe("bytes");
+    expect(decodeBase64WithLimit("YWI=", 1)).toEqual({ kind: "error", error: { code: "too_large" } });
+    // No padding: "YWJj" decodes to 3 bytes.
+    expect(decodeBase64WithLimit("YWJj", 3).kind).toBe("bytes");
+    expect(decodeBase64WithLimit("YWJj", 2)).toEqual({ kind: "error", error: { code: "too_large" } });
   });
 
   test("invalid base64 gives fetch_failed", () => {
@@ -79,6 +101,10 @@ describe("decodeBase64WithLimit", () => {
 describe("decodeDataUrl", () => {
   const PNG_1PX =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  test("the exported Accept header is the browser's image value", () => {
+    expect(IMAGE_ACCEPT).toBe("image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
+  });
 
   test("decodes a base64 data URL", () => {
     const result = decodeDataUrl(`data:image/png;base64,${PNG_1PX}`);
@@ -96,6 +122,67 @@ describe("decodeDataUrl", () => {
     if (result.kind !== "bytes") return;
     expect([...result.bytes]).toEqual([...png]);
     expect(result.mediaType).toBe("image/png");
+  });
+
+  test("uppercase-hex percent escapes are decoded", () => {
+    const result = decodeDataUrl("data:image/png,%89PNG%0D%0A");
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") return;
+    expect([...result.bytes]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
+  });
+
+  test("a literal character that is not a valid escape is kept verbatim", () => {
+    // "%2" and "%zz" are not escapes; both characters stay as written.
+    const result = decodeDataUrl("data:image/png,%2zz");
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") return;
+    expect([...result.bytes]).toEqual([0x25, 0x32, 0x7a, 0x7a]);
+  });
+
+  test("a non-ASCII character in the payload is unsupported_type", () => {
+    expect(decodeDataUrl("data:image/png,é")).toEqual({ kind: "error", error: { code: "unsupported_type" } });
+  });
+
+  test("a data: URL without a comma is unsupported_type", () => {
+    expect(decodeDataUrl("data:image/png;base64")).toEqual({ kind: "error", error: { code: "unsupported_type" } });
+  });
+
+  test("a URL that is not the data: scheme is unsupported even with a comma", () => {
+    // "xxxxx" + "image/png..." must not be treated as a data: URL.
+    expect(decodeDataUrl("xxxxximage/png;base64,YQ==")).toEqual({ kind: "error", error: { code: "unsupported_type" } });
+  });
+
+  test("the base64 marker is recognised with mixed case and whitespace", () => {
+    const png = minimalPng();
+    const encoded = encodeBase64(png);
+    for (const marker of [";base64", ";BASE64", "; base64 "]) {
+      const result = decodeDataUrl(`data:image/png${marker},${encoded}`);
+      expect(result.kind, marker).toBe("bytes");
+      // Assert the decoded bytes, not just the shape: a non-base64
+      // interpretation would also return "bytes" but with the literal text.
+      if (result.kind === "bytes") expect([...result.bytes], marker).toEqual([...png]);
+    }
+    // A payload that happens to contain "base64" as data is not base64-decoded.
+    const notBase64 = decodeDataUrl("data:image/png,purebase64text");
+    expect(notBase64.kind).toBe("bytes");
+    if (notBase64.kind !== "bytes") return;
+    expect(new TextDecoder().decode(notBase64.bytes)).toBe("purebase64text");
+  });
+
+  test("a non-base64 parameter does not trigger base64 decoding", () => {
+    // The "charset" parameter makes params non-empty; it must not count as the
+    // base64 marker, so the payload stays literal text.
+    const result = decodeDataUrl("data:image/png;charset=utf-8,hello");
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") return;
+    expect(new TextDecoder().decode(result.bytes)).toBe("hello");
+  });
+
+  test("a literal 0x7f byte is accepted (only code points above 0x7f are rejected)", () => {
+    const result = decodeDataUrl("data:image/png,\u007f");
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") return;
+    expect([...result.bytes]).toEqual([0x7f]);
   });
 
   test("decodes a base64 payload that carries percent escapes", () => {
@@ -141,11 +228,26 @@ describe("decodeDataUrl", () => {
   });
 
   test("rejects an oversized payload by length before decoding", () => {
-    expect(decodeDataUrl(`data:image/png,${"a".repeat(2000)}`, 1000)).toEqual({ kind: "error", error: { code: "too_large" } });
-    expect(decodeDataUrl(`data:image/png;base64,${"A".repeat(2000)}`, 1000)).toEqual({
+    // A payload long enough to trip the pre-decode length check but made of
+    // characters that are not valid base64: the pre-check must win, so the
+    // result is too_large, not the unsupported_type a decode failure gives.
+    expect(decodeDataUrl(`data:image/png;base64,${"!".repeat(5000)}`, 1000)).toEqual({
       kind: "error",
       error: { code: "too_large" },
     });
+    expect(decodeDataUrl(`data:image/png,${"a".repeat(2000)}`, 1000)).toEqual({ kind: "error", error: { code: "too_large" } });
+    expect(decodeDataUrl(`data:image/png;base64,${"A".repeat(2000)}`, 1000)).toEqual({ kind: "error", error: { code: "too_large" } });
+  });
+
+  test("the media type is empty: collectImage sniffs it from the bytes", async () => {
+    const streamed = await fetchImageBytes("https://cdn.example/i.png", {
+      fetchImpl: async () => streamResponse([minimalPng()]),
+    });
+    expect(streamed.kind === "bytes" && streamed.mediaType).toBe("");
+    const noBody = await fetchImageBytes("https://cdn.example/i.png", {
+      fetchImpl: async () => new Response(minimalPng().slice().buffer, { status: 200 }),
+    });
+    expect(noBody.kind === "bytes" && noBody.mediaType).toBe("");
   });
 
   test("non-image and malformed data URLs give unsupported_type", () => {
@@ -203,6 +305,59 @@ describe("fetchImageBytes", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  test("sends no credentials and the image Accept header", async () => {
+    const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push([input, init]);
+      return streamResponse([minimalPng()]);
+    }) as typeof fetch;
+    await fetchImageBytes("https://cdn.example/i.png", { fetchImpl });
+    expect(calls).toHaveLength(1);
+    const [url, init] = calls[0];
+    expect(url).toBe("https://cdn.example/i.png");
+    expect(init?.credentials).toBe("omit");
+    // Assert the literal: comparing against the imported constant would move
+    // with the mutant and detect nothing.
+    expect(init?.headers).toEqual({
+      Accept: "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    });
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("honours a caller-supplied deadline instead of the default", async () => {
+    vi.useFakeTimers();
+    try {
+      const outcome = fetchImageBytes("https://cdn.example/i.png", { fetchImpl: neverEndingFetch(), deadlineMs: 1000 });
+      await vi.advanceTimersByTimeAsync(999);
+      // Not yet aborted at 999 ms: prove by resolving nothing and only then
+      // crossing the deadline.
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(outcome).resolves.toEqual({ kind: "error", error: { code: "timeout" } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("clears its deadline timer when the fetch finishes", async () => {
+    vi.useFakeTimers();
+    try {
+      await fetchImageBytes("https://cdn.example/i.png", { fetchImpl: async () => streamResponse([minimalPng()]) });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a non-Abort DOMException maps to fetch_failed, not timeout", async () => {
+    const fetchImpl = async () => {
+      throw new DOMException("boom", "NetworkError");
+    };
+    expect(await fetchImageBytes("https://cdn.example/i.png", { fetchImpl })).toEqual({
+      kind: "error",
+      error: { code: "fetch_failed" },
+    });
+  });
+
   test("stops reading once more than 50 MiB has arrived", async () => {
     const chunk = new Uint8Array(30 * MIB).fill(1);
     let cancelled = false;
@@ -219,6 +374,65 @@ describe("fetchImageBytes", () => {
     const result = await fetchImageBytes("https://cdn.example/i.png", { fetchImpl });
     expect(result).toEqual({ kind: "error", error: { code: "too_large" } });
     expect(cancelled).toBe(true);
+  });
+
+  test("accepts a stream exactly at 50 MiB and rejects one byte over", async () => {
+    const exact = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_IMAGE_BYTES));
+        controller.close();
+      },
+    });
+    const ok = await fetchImageBytes("https://cdn.example/i.png", {
+      fetchImpl: async () => new Response(exact, { status: 200 }),
+    });
+    expect(ok.kind).toBe("bytes");
+
+    const over = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_IMAGE_BYTES));
+        controller.enqueue(new Uint8Array(1));
+      },
+    });
+    const tooLarge = await fetchImageBytes("https://cdn.example/i.png", {
+      fetchImpl: async () => new Response(over, { status: 200 }),
+    });
+    expect(tooLarge).toEqual({ kind: "error", error: { code: "too_large" } });
+  }, 20_000);
+
+  test("assembles a multi-chunk stream in order", async () => {
+    const first = new Uint8Array([1, 2, 3]);
+    const second = new Uint8Array([4, 5, 6]);
+    const result = await fetchImageBytes("https://cdn.example/i.png", {
+      fetchImpl: async () => streamResponse([first, second]),
+    });
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") return;
+    expect([...result.bytes]).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  test("maps a non-abort error while reading the body to fetch_failed", async () => {
+    const fetchImpl = async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error("connection reset"));
+        },
+      });
+      return new Response(body, { status: 200 });
+    };
+    expect(await fetchImageBytes("https://cdn.example/i.png", { fetchImpl })).toEqual({
+      kind: "error",
+      error: { code: "fetch_failed" },
+    });
+  });
+
+  test("a response with no body falls back to arrayBuffer and enforces the cap", async () => {
+    const fetchImpl = async () => new Response(minimalPng().slice().buffer, { status: 200 });
+    const result = await fetchImageBytes("https://cdn.example/i.png", { fetchImpl });
+    expect(result.kind).toBe("bytes");
+    if (result.kind !== "bytes") return;
+    expect([...result.bytes]).toEqual([...minimalPng()]);
+    expect(result.mediaType).toBe("");
   });
 
   test("maps a non-2xx response to fetch_failed", async () => {

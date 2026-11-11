@@ -184,5 +184,163 @@ describe("scanXmp: XML serialization forms", () => {
     const packet = elementPacket(`<![CDATA[${TRAINED}]]>`);
     expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(DETECTED);
   });
+
+  test("a comment inside the value is stripped before matching", () => {
+    // Comment sits between two halves of a generator name: stripping it joins
+    // them into a match; replacing it with text breaks the name apart.
+    const split = `Chat<!--x-->GPT`;
+    const packet =
+      `<x:xmpmeta xmlns:x="adobe:ns:meta/">${RDF} xmp:CreatorTool="${split}"/></rdf:RDF></x:xmpmeta>`;
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({ state: "not_detected", generatorHint: "ChatGPT" } satisfies LocalXmp);
+  });
+
+  test("a property immediately before the end marker is still read", () => {
+    // The packet slice must include the whole end marker; cutting it short
+    // would drop this trailing property.
+    const packet = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:Description Iptc4xmpExt:DigitalSourceType="${TRAINED}"/></x:xmpmeta>`;
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(DETECTED);
+  });
+});
+
+// These cases exist to pin down the exact shape of each regex: the boundary
+// quantifiers, the whitespace around "=" and the anchor of the value group.
+// A narrower regex or a dropped quantifier must turn one of these red.
+describe("scanXmp: property regex boundaries", () => {
+  const body = (inner: string): Uint8Array => new TextEncoder().encode(`<x:xmpmeta xmlns:x="adobe:ns:meta/">${inner}</x:xmpmeta>`);
+
+  test("rdf:resource recognises a tag with an attribute before it and spaces around =", () => {
+    const tagged =
+      `<rdf:RDF><rdf:Description xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/">` +
+      `<Iptc4xmpExt:DigitalSourceType x="1" rdf:resource = "${TRAINED}"/></rdf:Description></rdf:RDF>`;
+    expect(scanXmp(body(tagged))).toEqual(DETECTED);
+  });
+
+  test("element form recognises a start tag that carries an attribute", () => {
+    const tagged =
+      `<rdf:RDF><rdf:Description xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/">` +
+      `<Iptc4xmpExt:DigitalSourceType foo="1">${TRAINED}</Iptc4xmpExt:DigitalSourceType></rdf:Description></rdf:RDF>`;
+    expect(scanXmp(body(tagged))).toEqual(DETECTED);
+  });
+
+  test("attribute form recognises spaces around =", () => {
+    const tagged =
+      `<rdf:RDF><rdf:Description xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/"` +
+      ` Iptc4xmpExt:DigitalSourceType = "${TRAINED}"/></rdf:RDF>`;
+    expect(scanXmp(body(tagged))).toEqual(DETECTED);
+  });
+
+  test("a value is trimmed of surrounding whitespace before matching", () => {
+    const tagged =
+      `<rdf:RDF><rdf:Description xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/">` +
+      `<Iptc4xmpExt:DigitalSourceType>  ${TRAINED}  </Iptc4xmpExt:DigitalSourceType></rdf:Description></rdf:RDF>`;
+    expect(scanXmp(body(tagged))).toEqual(DETECTED);
+  });
+
+  test("CreatorTool rdf:resource form recognises an attribute before it and spaces around =", () => {
+    const tagged =
+      `<rdf:RDF><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/">` +
+      `<xmp:CreatorTool x="1" rdf:resource = "ChatGPT"/></rdf:Description></rdf:RDF>`;
+    expect(scanXmp(body(tagged))).toEqual({ state: "not_detected", generatorHint: "ChatGPT" } satisfies LocalXmp);
+  });
+
+  test("CreatorTool rdf:resource form recognises no whitespace around =", () => {
+    const tagged =
+      `<rdf:RDF><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/">` +
+      `<xmp:CreatorTool rdf:resource="ChatGPT"/></rdf:Description></rdf:RDF>`;
+    expect(scanXmp(body(tagged))).toEqual({ state: "not_detected", generatorHint: "ChatGPT" } satisfies LocalXmp);
+  });
+
+  test("CreatorTool element form recognises a start tag that carries an attribute", () => {
+    // "Stable Diffusion" carries a space: the value group must match across
+    // whitespace, not just non-whitespace characters.
+    const tagged =
+      `<rdf:RDF><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/">` +
+      `<xmp:CreatorTool foo="1">Stable Diffusion</xmp:CreatorTool></rdf:Description></rdf:RDF>`;
+    expect(scanXmp(body(tagged))).toEqual({ state: "not_detected", generatorHint: "Stable Diffusion" } satisfies LocalXmp);
+  });
+
+  test("CreatorTool attribute form recognises spaces around =", () => {
+    const tagged =
+      `<rdf:RDF><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/"` +
+      ` xmp:CreatorTool = "Midjourney"/></rdf:RDF>`;
+    expect(scanXmp(body(tagged))).toEqual({ state: "not_detected", generatorHint: "Midjourney" } satisfies LocalXmp);
+  });
+});
+
+describe("scanXmp: XML entity decoding", () => {
+  const CAPTURE = "http://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture";
+
+  test("a named entity is decoded", () => {
+    const packet = attributePacket(`${CAPTURE}&amp;x`);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({
+      state: "not_detected",
+      digitalSourceType: `${CAPTURE}&x`,
+    } satisfies LocalXmp);
+  });
+
+  test("every predefined named entity is decoded", () => {
+    const cases: Array<[string, string]> = [
+      ["lt", "<"],
+      ["gt", ">"],
+      ["quot", '"'],
+      ["apos", "'"],
+    ];
+    for (const [name, char] of cases) {
+      const packet = attributePacket(`${CAPTURE}&${name};`);
+      expect(scanXmp(jpegWithXmpPacket(packet)), name).toEqual({
+        state: "not_detected",
+        digitalSourceType: `${CAPTURE}${char}`,
+      } satisfies LocalXmp);
+    }
+  });
+
+  test("an unknown named entity is left as written", () => {
+    const packet = attributePacket(`${CAPTURE}&nosuch;`);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({
+      state: "not_detected",
+      digitalSourceType: `${CAPTURE}&nosuch;`,
+    } satisfies LocalXmp);
+  });
+
+  test("an uppercase-hex character reference is decoded", () => {
+    const packet = attributePacket(`${CAPTURE}&#X41;`);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({
+      state: "not_detected",
+      digitalSourceType: `${CAPTURE}A`,
+    } satisfies LocalXmp);
+  });
+
+  test("the NUL code point is a valid reference", () => {
+    const packet = attributePacket(`${CAPTURE}&#0;`);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({
+      state: "not_detected",
+      digitalSourceType: `${CAPTURE}\u0000`,
+    } satisfies LocalXmp);
+  });
+
+  test("the highest code point is a valid reference", () => {
+    const packet = attributePacket(`${CAPTURE}&#1114111;`);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({
+      state: "not_detected",
+      digitalSourceType: `${CAPTURE}\u{10ffff}`,
+    } satisfies LocalXmp);
+  });
+
+  test("a code point above the Unicode range is left as written, not thrown", () => {
+    const packet = attributePacket(`${CAPTURE}&#1114112;`);
+    expect(scanXmp(jpegWithXmpPacket(packet))).toEqual({
+      state: "not_detected",
+      digitalSourceType: `${CAPTURE}&#1114112;`,
+    } satisfies LocalXmp);
+  });
+});
+
+describe("scanXmp: packet boundaries", () => {
+  test("an end marker before the start marker does not close a later packet", () => {
+    // The scan starts at "<x:xmpmeta"; an earlier "</x:xmpmeta>" must not be
+    // picked up as its terminator (the END search starts after the START).
+    const bytes = new TextEncoder().encode(`AAAAAAAAAA${"</x:xmpmeta>"}<x:xmpmeta>`);
+    expect(scanXmp(bytes)).toEqual({ state: "error" } satisfies LocalXmp);
+  });
 });
 
