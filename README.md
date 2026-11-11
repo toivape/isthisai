@@ -32,7 +32,11 @@ shared types/helpers) to check that the tests actually detect faults, not just e
 lines. The injectable/MV3 surfaces (`src/content/index.ts`, `src/content/readBlob.ts`,
 `src/confirm/`, `src/options/`, the chrome wiring in `src/background/index.ts`) are
 covered by the manual checklist in `PLAN.md` §8 instead. It writes an HTML report to
-`reports/mutation/mutation.html` (git-ignored). This is a local check, not part of CI.
+`reports/mutation/mutation.html` (git-ignored).
+
+It is not part of the PR/push pipeline (`ci.yml`). Run it locally, or start the
+**Mutation testing** workflow by hand from the GitHub Actions tab (pick a branch in the
+"Run workflow" dropdown); that job uploads the report as a `mutation-report` artifact.
 
 ## Load in Brave
 
