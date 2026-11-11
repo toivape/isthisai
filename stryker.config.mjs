@@ -30,10 +30,9 @@ export default {
     "!src/shared/i18n.ts",
     "!src/shared/limits.ts",
   ],
-  // Baseline measured 2026-11-11: 73.44% total / 77.7% covered. The surviving
-  // mutants are concentrated in c2pa.ts, xmp.ts and fetchImage.ts edge branches
-  // and are future test work; keep break a little under the baseline so a real
-  // regression fails the run without flapping.
-  thresholds: { high: 85, low: 70, break: 70 },
+  // The gate: exit non-zero under 90%. Baseline measured 2026-11-11: 94.29%
+  // total / 95.8% covered; the remaining survivors are equivalent mutants (see
+  // the test files' comments).
+  thresholds: { high: 90, low: 85, break: 90 },
   timeoutMS: 30000,
 };
