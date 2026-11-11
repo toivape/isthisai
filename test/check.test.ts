@@ -274,6 +274,25 @@ describe("runCheckSteps: cache (#20)", () => {
     expect(outcome.kind).toBe("done");
   });
 
+  test("a failed cache write is logged so the swallowed error is not silent", async () => {
+    const error = new Error("Session storage quota bytes exceeded");
+    const store: CacheStore = {
+      get: async () => undefined,
+      set: async () => {
+        throw error;
+      },
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const fetchImpl = vi.fn(async () => pngResponse());
+      const { deps } = fakeDeps({ fetchImpl, store });
+      await runCheckSteps(deps, { ...POSITION, srcUrl: "https://page.example/i.png", checkId: "c1" });
+      expect(errorSpy).toHaveBeenCalledWith("cache write failed", error);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   test("a store that rejects only on read is also survived", async () => {
     const store: CacheStore = {
       get: async () => {
@@ -286,6 +305,31 @@ describe("runCheckSteps: cache (#20)", () => {
     const outcome = await runCheckSteps(deps, { ...POSITION, srcUrl: "https://page.example/i.png", checkId: "c1" });
     expect(updates.sent.map((u) => u.status)).toEqual(["checking", "done"]);
     expect(outcome.kind).toBe("done");
+  });
+
+  test("a failed cache read is logged and the check runs the local checks", async () => {
+    const error = new Error("session storage unavailable");
+    const store: CacheStore = {
+      get: async () => {
+        throw error;
+      },
+      set: async () => {},
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const fetchImpl = vi.fn(async () => pngResponse());
+      const readC2pa = vi.fn(async () => ({ manifest: "absent", aiAction: false })) as unknown as typeof import("../src/background/c2pa").readC2pa;
+      const { deps, updates } = fakeDeps({ fetchImpl, store, readC2pa });
+      const outcome = await runCheckSteps(deps, { ...POSITION, srcUrl: "https://page.example/i.png", checkId: "c1" });
+      expect(errorSpy).toHaveBeenCalledWith("cache read failed", error);
+      // The read failure must not be mistaken for a cache hit: the local checks
+      // still run so the user gets a real result.
+      expect(readC2pa).toHaveBeenCalledOnce();
+      expect(outcome.kind).toBe("done");
+      expect(updates.sent.map((u) => u.status)).toEqual(["checking", "done"]);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   test("the check record is stored before the done update, on the payload-free data: URL", async () => {

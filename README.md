@@ -32,7 +32,8 @@ shared types/helpers) to check that the tests actually detect faults, not just e
 lines. The injectable/MV3 surfaces (`src/content/index.ts`, `src/content/readBlob.ts`,
 `src/confirm/`, `src/options/`, the chrome wiring in `src/background/index.ts`) are
 covered by the manual checklist in `PLAN.md` §8 instead. It writes an HTML report to
-`reports/mutation/mutation.html` (git-ignored).
+`reports/mutation/mutation.html` (git-ignored) and exits non-zero if the mutation score
+drops below the `break` threshold (90%; see `stryker.config.mjs`).
 
 It is not part of the PR/push pipeline (`ci.yml`). Run it locally, or start the
 **Mutation testing** workflow by hand from the GitHub Actions tab (pick a branch in the
