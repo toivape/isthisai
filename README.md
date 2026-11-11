@@ -35,9 +35,14 @@ covered by the manual checklist in `PLAN.md` §8 instead. It writes an HTML repo
 `reports/mutation/mutation.html` (git-ignored) and exits non-zero if the mutation score
 drops below the `break` threshold (90%; see `stryker.config.mjs`).
 
-It is not part of the PR/push pipeline (`ci.yml`). Run it locally, or start the
-**Mutation testing** workflow by hand from the GitHub Actions tab (pick a branch in the
-"Run workflow" dropdown); that job uploads the report as a `mutation-report` artifact.
+`npm run test:mutation:changed` runs the same check scoped to the files a branch changed
+versus a base ref (default `origin/main`, override with `--base <ref>`): the changed
+files under the mutate scope plus the sources that changed test files import. This is the
+job that runs on every pull request (`ci.yml`) as a fast signal, and it is **report-only**
+— it never fails the PR on the score (`stryker.pr.config.mjs`). The full, gated run is run
+locally or by hand: start the **Mutation testing** workflow from the GitHub Actions tab
+(pick a branch in the "Run workflow" dropdown); that job uploads the report as a
+`mutation-report` artifact.
 
 ## Load in Brave
 
