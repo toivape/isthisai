@@ -29,7 +29,7 @@ export default tseslint.config(
   },
   {
     // Plain .mjs outside tsconfig (which has no allowJs): no type information.
-    files: ["scripts/**/*.mjs", "eslint.config.mjs", "stryker.config.mjs"],
+    files: ["scripts/**/*.mjs", "eslint.config.mjs", "stryker.config.mjs", "stryker.pr.config.mjs"],
     ...tseslint.configs.disableTypeChecked,
   },
 );

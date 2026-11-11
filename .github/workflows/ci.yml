@@ -19,3 +19,29 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # Mutation testing scoped to what the PR changed, as a fast signal. Report
+  # only: it never fails the PR on the score (see stryker.pr.config.mjs). The
+  # full, gated mutation run stays manual (.github/workflows/mutation.yml).
+  mutation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # changed-mutants.mjs needs the base branch to compute `git diff
+          # <base>...HEAD`, so fetch more than the default single commit.
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: git fetch --no-tags origin "${{ github.base_ref }}"
+      - run: npm run test:mutation:changed -- --base "origin/${{ github.base_ref }}"
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-report-pr
+          path: reports/mutation
+          if-no-files-found: ignore

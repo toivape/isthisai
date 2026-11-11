@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.ts",
-    "test:mutation": "stryker run"
+    "test:mutation": "stryker run",
+    "test:mutation:changed": "node scripts/mutation-changed.mjs"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^10.1.1",
