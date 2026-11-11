@@ -17,6 +17,7 @@
     "test",
     "vite.config.ts",
     "vite.content.config.ts",
-    "vitest.live.config.ts"
+    "vitest.live.config.ts",
+    "vitest.mutation.config.ts"
   ]
 }
