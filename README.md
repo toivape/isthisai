@@ -24,6 +24,20 @@ npm run test:live  # opt-in: hits the real OpenAI API, reads OPENAI_API_KEY from
 
 CI runs `typecheck`, `test` and `build` on every pull request and on pushes to `main`.
 
+## Mutation testing
+
+`npm run test:mutation` runs [Stryker](https://stryker-mutator.io) over the unit-tested
+pure logic (`src/background/`, the unit-tested modules under `src/content/`, and the
+shared types/helpers) to check that the tests actually detect faults, not just execute
+lines. The injectable/MV3 surfaces (`src/content/index.ts`, `src/content/readBlob.ts`,
+`src/confirm/`, `src/options/`, the chrome wiring in `src/background/index.ts`) are
+covered by the manual checklist in `PLAN.md` §8 instead. It writes an HTML report to
+`reports/mutation/mutation.html` (git-ignored).
+
+It is not part of the PR/push pipeline (`ci.yml`). Run it locally, or start the
+**Mutation testing** workflow by hand from the GitHub Actions tab (pick a branch in the
+"Run workflow" dropdown); that job uploads the report as a `mutation-report` artifact.
+
 ## Load in Brave
 
 1. `npm run build`

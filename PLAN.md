@@ -351,6 +351,8 @@ Not an AI signal (show details in the popup, no TÄ):
 
 **CI:** GitHub Actions runs `npm ci`, `typecheck`, `test` and `build` on every pull request and on pushes to `main`.
 
+**Mutation testing (issue #30):** `npm run test:mutation` runs Stryker (`@stryker-mutator/core` with the Vitest runner and the TypeScript checker) over the unit-tested pure logic to check the tests detect faults, not just execute lines. The browser/injection surfaces that PLAN §8 covers manually are excluded (see `stryker.config.mjs`). It is not part of the PR/push pipeline; run it locally, or trigger the manual `Mutation testing` workflow from the Actions tab, which uploads `reports/mutation/` as an artifact.
+
 **Mocking:** mock `fetch` for the OpenAI endpoint. No real API calls in `npm test`. `npm run test:live` uses a separate Vitest config that includes only `test/live/*.live.ts`; it reads `OPENAI_API_KEY` from the environment, checks the two fixtures against `test/fixtures/openai-*.json`, exits non-zero with a message when the key is missing, and never prints the key.
 
 **Manual test checklist** (run by the owner in Brave with the extension loaded via `brave://extensions` > Developer mode > Load unpacked):

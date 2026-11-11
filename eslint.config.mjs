@@ -4,7 +4,7 @@ import tseslint from "typescript-eslint";
 // JS API); package.json aliases make import("typescript") resolve to the 6.x
 // shim while the `tsc` binary stays on 7. See the TS 7.0 side-by-side notes.
 export default tseslint.config(
-  { ignores: ["dist/**", "coverage/**", ".scratch/**"] },
+  { ignores: ["dist/**", "coverage/**", ".scratch/**", "reports/**", ".stryker-tmp/**"] },
   tseslint.configs.recommendedTypeChecked,
   {
     languageOptions: {
@@ -29,7 +29,7 @@ export default tseslint.config(
   },
   {
     // Plain .mjs outside tsconfig (which has no allowJs): no type information.
-    files: ["scripts/**/*.mjs", "eslint.config.mjs"],
+    files: ["scripts/**/*.mjs", "eslint.config.mjs", "stryker.config.mjs"],
     ...tseslint.configs.disableTypeChecked,
   },
 );

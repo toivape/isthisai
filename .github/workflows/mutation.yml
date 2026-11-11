@@ -1,0 +1,25 @@
+name: Mutation testing
+
+# Run on demand from the Actions tab only: this is not part of the PR/push
+# pipeline (ci.yml). Pick any branch in the "Run workflow" dropdown.
+on:
+  workflow_dispatch:
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:mutation
+      # The report is most useful exactly when the score is under the break
+      # threshold, so upload it whatever the step above returned.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-report
+          path: reports/mutation
