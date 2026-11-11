@@ -150,3 +150,7 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Stryker mutation testing
+reports/
+.stryker-tmp/
