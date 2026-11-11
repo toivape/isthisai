@@ -13,6 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
+import ts from "typescript";
 import base from "../stryker.config.mjs";
 
 const toPosix = (path) => path.split(sep).join("/");
@@ -52,42 +53,32 @@ export function isMutable(path, patterns = base.mutate) {
   return positives.some((p) => globToRegExp(p).test(path));
 }
 
-/** Every module specifier a source file imports.
+/** Every runtime module specifier a source file imports.
  *
- * Only import statements are matched, never import-looking text inside a string
- * literal (a test may contain `'import x from "./a"'` as data). A real import
- * statement starts a line — or is the `} from "..."` tail of a multi-line one —
- * which is what the anchoring below relies on. Skips `import type` (no runtime
- * behaviour; following it would drag src/shared/types.ts into every run). */
+ * Parsed with the TypeScript compiler (already a devDependency) rather than a
+ * regex: a regex cannot tell a real import from import-looking text in a string
+ * literal (test fixtures contain those) and misses destructured dynamic imports
+ * (`const { x } = await import("...")`). Type-only imports and `typeof
+ * import(...)` are skipped: they carry no runtime behaviour, and following them
+ * would drag shared type modules into every run. */
 export function importSpecifiers(source) {
+  const file = ts.createSourceFile("imports.ts", source, ts.ScriptTarget.Latest);
   const specifiers = new Set();
-  const lines = source.split("\n");
-  for (let index = 0; index < lines.length; index++) {
-    const trimmed = lines[index].trimStart();
-    if (/^import\s+type\b/.test(trimmed)) continue;
-    // A statement start: `import ...` or a `} from "..."` closing a multi-line import.
-    const isImportStart = /^import\b/.test(trimmed) || (trimmed.startsWith("}") && trimmed.includes(" from "));
-    const isDynamicImport = /^(?:const|let|var)\s+\w+\s*=\s*(?:await\s+)?import\(/.test(trimmed);
-    if (!isImportStart && !isDynamicImport) continue;
-    const specifier = findSpecifier(trimmed, lines, index);
-    if (specifier !== undefined) specifiers.add(specifier);
-  }
+  const add = (node) => {
+    if (node && ts.isStringLiteralLike(node)) specifiers.add(node.text);
+  };
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node)) {
+      if (!node.importClause?.isTypeOnly) add(node.moduleSpecifier);
+    } else if (ts.isExportDeclaration(node)) {
+      if (!node.isTypeOnly) add(node.moduleSpecifier);
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      add(node.arguments[0]); // dynamic import, any binding form
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
   return [...specifiers];
-}
-
-// The module specifier of one import statement, whether it fits on the line or
-// continues onto following lines (`import {\n x\n} from "m"`).
-function findSpecifier(firstLine, lines, index) {
-  let text = firstLine;
-  let scan = index;
-  while (!text.includes("from ") && !/["']/.test(text.replace(/^import\s*\(?\s*/, "")) && scan + 1 < lines.length) {
-    scan++;
-    text += " " + lines[scan].trim();
-  }
-  const quoted = text.match(/["']([^"']+)["']/g);
-  if (!quoted || quoted.length === 0) return undefined;
-  const last = quoted[quoted.length - 1];
-  return last.slice(1, -1);
 }
 
 /**

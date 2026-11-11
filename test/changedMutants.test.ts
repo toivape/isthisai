@@ -68,15 +68,32 @@ describe("importSpecifiers", () => {
     expect(importSpecifiers(source)).toEqual(["./a", "../b", "./side-effect", "./c"]);
   });
 
-  test("reads the specifier of a multi-line import from its closing line", () => {
+  test("reads the specifier of a multi-line import", () => {
     const source = ["import {", "  a,", "  b,", '} from "../src/background/xmp";'].join("\n");
     expect(importSpecifiers(source)).toEqual(["../src/background/xmp"]);
+  });
+
+  test("recognises destructured and wrapped dynamic imports", () => {
+    // Regression: test/c2pa-reader.test.ts uses `const { readC2pa } = await
+    // import(...)`, and test/check.test.ts uses `(await import(...)).x`; both
+    // must resolve so a change to such a test selects its source.
+    const source = [
+      'const { readC2pa } = await import("../src/background/c2pa");',
+      'const real = (await import("../src/background/xmp")).scanXmp;',
+      'const m = import("../src/background/sniff");',
+    ].join("\n");
+    expect(importSpecifiers(source)).toEqual([
+      "../src/background/c2pa",
+      "../src/background/xmp",
+      "../src/background/sniff",
+    ]);
   });
 
   test("skips type-only imports so shared type modules are not dragged in", () => {
     const source = [
       'import type { CheckResult } from "../src/shared/types";',
       'import { type Other } from "../src/shared/other";',
+      "type R = typeof import('../src/background/c2pa').readC2pa;",
       'import { scanXmp } from "../src/background/xmp";',
     ].join("\n");
     expect(importSpecifiers(source)).toEqual(["../src/shared/other", "../src/background/xmp"]);
@@ -90,6 +107,21 @@ describe("importSpecifiers", () => {
       "expect(selectMutants([\"test/x.test.ts\"], () => 'import { b } from \"../b\";')).toEqual([]);",
     ].join("\n");
     expect(importSpecifiers(source)).toEqual(["vitest"]);
+  });
+
+  test("ignores a commented-out import", () => {
+    expect(importSpecifiers('// import x from "./nope";\nimport a from "./a";')).toEqual(["./a"]);
+  });
+
+  test("selects the source of a changed test that uses a destructured dynamic import", () => {
+    const fileExists = (p: string) => p === "src/background/c2pa.ts";
+    expect(
+      selectMutants(
+        ["test/c2pa-reader.test.ts"],
+        () => 'const { readC2pa } = await import("../src/background/c2pa");',
+        fileExists,
+      ),
+    ).toEqual(["src/background/c2pa.ts"]);
   });
 });
 
