@@ -10,7 +10,9 @@ export default {
   plugins: ["@stryker-mutator/vitest-runner", "@stryker-mutator/typescript-checker"],
   checkers: ["typescript"],
   tsconfigFile: "tsconfig.json",
-  vitest: { configFile: "vite.config.ts" },
+  // Mutation runs are instrumented and several times slower, so they use a
+  // config that only raises the vitest test timeout (see the file's comment).
+  vitest: { configFile: "vitest.mutation.config.ts" },
   reporters: ["clear-text", "progress", "html"],
   coverageAnalysis: "perTest",
   // Keep throwaway/local-only trees out of the sandbox copy.
