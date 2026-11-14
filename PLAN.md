@@ -418,6 +418,7 @@ Not an AI signal (show details in the popup, no TÄ):
 **M3. XMP and cache**
 - XMP scanner and session cache, added to the M2 pipeline.
 - Accept: an image with only XMP DigitalSourceType shows TÄ; checking the same image twice reuses the cached result.
+- **Accept verified in Brave 2026-11-14 (owner-run, not by the implementer; covers §8 items 26 and 27):** `ai-meta-bunny.jpg` shows TÄ with "AI signal found" — the same file read "No AI signal found" before the prefix fix (#41). Seven clicks across two URLs produced seven `check:` records sharing one `imageHash`, and exactly one `result:a4da874c…` key holding `localXmp: {state:"detected"}` with `verdict: "ai_signal"`; no entry held image bytes, and `chrome.storage.session` was empty again after a browser restart. One limit: the criterion is met as §8 words it — `result:<hash>` present. A cache hit has no log line, so the skip itself stays unobserved, and a miss would rewrite the same key.
 
 **M4. Options and OpenAI check**
 - Options page, OpenAI request/response/error handling, confirmation window, OpenAI flow (re-fetch, hash check, server conversion), `test:live`.
