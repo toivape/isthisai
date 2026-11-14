@@ -4,7 +4,9 @@
 // are not read (documented limitation, PLAN §3 / §9 M7).
 //
 // Known limits (regex scan, not an XML parser):
-// - Only the conventional prefixes Iptc4xmpExt: and xmp: are recognised.
+// - Property prefixes are read from the packet's xmlns declarations; a packet
+//   that omits them is not read (real XMP declares them).
+// - The rdf: prefix on rdf:resource is assumed conventional, not resolved.
 // - UTF-16 packets are not decoded (reported as not_detected).
 // - The attribute form can match the same text inside another property's value.
 // - A "</x:xmpmeta>" inside a comment ends the packet early.
@@ -23,15 +25,41 @@ const AI_SOURCE_SUFFIXES = ["trainedAlgorithmicMedia", "compositeWithTrainedAlgo
 const START = new TextEncoder().encode("<x:xmpmeta");
 const END = new TextEncoder().encode("</x:xmpmeta>");
 
-// Attribute and element forms of the two properties. Element values may carry
-// an rdf:resource attribute instead of text, and their text may be wrapped in
-// CDATA; entities in either form are decoded before matching.
-const DIGITAL_SOURCE_RESOURCE = /<Iptc4xmpExt:DigitalSourceType\b[^>]*\brdf:resource\s*=\s*(["'])(.*?)\1/s;
-const DIGITAL_SOURCE_ELEM = /<Iptc4xmpExt:DigitalSourceType\b[^>]*>([\s\S]*?)<\/Iptc4xmpExt:DigitalSourceType>/s;
-const DIGITAL_SOURCE_ATTR = /\bIptc4xmpExt:DigitalSourceType\s*=\s*(["'])(.*?)\1/s;
-const CREATOR_RESOURCE = /<xmp:CreatorTool\b[^>]*\brdf:resource\s*=\s*(["'])(.*?)\1/s;
-const CREATOR_ELEM = /<xmp:CreatorTool\b[^>]*>([\s\S]*?)<\/xmp:CreatorTool>/s;
-const CREATOR_ATTR = /\bxmp:CreatorTool\s*=\s*(["'])(.*?)\1/s;
+const IPTC_EXT_NS = "http://iptc.org/std/Iptc4xmpExt/2008-02-29/";
+const XMP_NS = "http://ns.adobe.com/xap/1.0/";
+
+// A prefix is a local alias for a namespace URI, and the URI is what identifies
+// a property: Adobe writes Iptc4xmpExt:, Exiv2 writes iptcExt:. Returns every
+// prefix the packet binds to `uri`, plus "" for the default namespace, which
+// applies to element names only, never to attributes.
+const XMLNS_DECL = /\bxmlns(?::([A-Za-z_][\w.-]*))?\s*=\s*(["'])(.*?)\2/g;
+
+function prefixesFor(packet: string, uri: string): string[] {
+  const prefixes = new Set<string>();
+  for (const [, prefix, , declared] of packet.matchAll(XMLNS_DECL)) {
+    if (declared === uri) prefixes.add(prefix ?? "");
+  }
+  return [...prefixes];
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Every serialisation of one property: rdf:resource, element text and attribute
+// value. Element text may be wrapped in CDATA; entities in either form are
+// decoded before matching.
+function propertyValue(packet: string, uri: string, local: string): string | undefined {
+  for (const prefix of prefixesFor(packet, uri)) {
+    const name = escapeRegex(prefix === "" ? local : `${prefix}:${local}`);
+    const raw =
+      new RegExp(`<${name}\\b[^>]*\\brdf:resource\\s*=\\s*(["'])(.*?)\\1`, "s").exec(packet)?.[2] ??
+      new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, "s").exec(packet)?.[1] ??
+      (prefix === "" ? undefined : new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, "s").exec(packet)?.[2]);
+    if (raw !== undefined) return decodeXmlEntities(unwrapCdata(raw)).trim();
+  }
+  return undefined;
+}
 
 const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
 
@@ -54,11 +82,6 @@ function unwrapCdata(text: string): string {
   return text.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
 }
 
-function propertyValue(packet: string, resource: RegExp, element: RegExp, attribute: RegExp): string | undefined {
-  const value = resource.exec(packet)?.[2] ?? element.exec(packet)?.[1] ?? attribute.exec(packet)?.[2];
-  return value === undefined ? undefined : decodeXmlEntities(unwrapCdata(value)).trim();
-}
-
 // Comments are not data: a commented-out property must not count. Strip them
 // once, before any property is read.
 function stripComments(packet: string): string {
@@ -75,7 +98,7 @@ export function scanXmp(bytes: Uint8Array): LocalXmp {
   const packet = stripComments(new TextDecoder("utf-8").decode(bytes.subarray(start, end + END.length)));
   const result: LocalXmp = { state: "not_detected" };
 
-  const sourceType = propertyValue(packet, DIGITAL_SOURCE_RESOURCE, DIGITAL_SOURCE_ELEM, DIGITAL_SOURCE_ATTR);
+  const sourceType = propertyValue(packet, IPTC_EXT_NS, "DigitalSourceType");
   if (sourceType) {
     if (AI_SOURCE_SUFFIXES.some((suffix) => sourceType.endsWith(suffix))) {
       result.state = "detected";
@@ -84,7 +107,7 @@ export function scanXmp(bytes: Uint8Array): LocalXmp {
     }
   }
 
-  const creator = propertyValue(packet, CREATOR_RESOURCE, CREATOR_ELEM, CREATOR_ATTR);
+  const creator = propertyValue(packet, XMP_NS, "CreatorTool");
   if (creator !== undefined && GENERATOR_NAMES.some((name) => creator.toLowerCase().includes(name.toLowerCase()))) {
     result.generatorHint = creator;
   }

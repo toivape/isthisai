@@ -47,6 +47,7 @@ Work through the milestones in order. Each has acceptance criteria; do not start
   - `ai-test-halloween.png` (original ChatGPT image): `c2pa` detected (trusted, issuer "OpenAI OpCo, LLC", model "ChatGPT / gpt-image") and `synthid` detected.
   - `ai-tes-iceland.jpg` (phone photo): both `not_detected`, c2pa `validation_state: "not_present"`.
   - `ai-test-halloween-resaved.jpg` (the halloween image re-saved as JPEG, metadata stripped): c2pa `not_detected` (`not_present`), **synthid `detected`**. Local C2PA gives `JumbfNotFound` and the file has no XMP packet. The watermark survives a re-save; the metadata does not.
+- **Observed in the owner's own samples (2026-11-14; `scanXmp` plus `WasmReader` with remote fetches disabled):** ChatGPT (PNG), Google Gemini and Microsoft Bing Image Creator (JPEG) all write `trainedAlgorithmicMedia` into a signed C2PA manifest and carry **no** loose XMP packet. Meta AI (`ai-meta-bunny.jpg`) is the opposite: no manifest at all, the value only as loose XMP, serialised by Exiv2 under the prefix `iptcExt:` rather than Adobe's `Iptc4xmpExt:`. Both local paths are therefore load-bearing, and a vendor's prefix is not fixed — which is why the scanner matches the namespace URI, not the prefix (section 3). The Meta file also carries an `8BIM`/`FBMD` block that the scanner does not read.
 - **Local C2PA library, verified 2026-10-31:**
   - The `c2pa` npm package is deprecated in favour of `@contentauth/c2pa-web`.
   - `@contentauth/c2pa-web` always spawns a Web Worker (`new Worker(...)`; a custom `workerSrc` must be `https:`). Service workers have no `Worker`, so it cannot be used in the service worker.
@@ -151,7 +152,7 @@ Storage:
 - TypeScript, Vite (or esbuild) multi-entry build, Vitest for unit tests.
 - `@contentauth/c2pa-wasm` for Content Credentials, pinned to an exact version in `package.json` (no `^`/`~`; 0.x releases change the API and the settings format). Upgrade deliberately, with the fixture tests as the gate. Called via `WasmReader.fromBytes` directly in the service worker, always with remote fetches disabled (section 2). Needs `'wasm-unsafe-eval'` in the extension CSP and the `.wasm` bundled in the extension. **Static import only** — dynamic `import()` is banned in the service worker global scope (verified by the M0 spike, section 2; enforced by the `no-dynamic-import` rule). Initialise lazily inside the event handler (module service workers do not allow top-level `await`; listeners must be registered synchronously). Call `free()` on readers.
 - No C2PA trust list in v0.1 (bundling one goes stale; downloading one breaks the no-extra-requests rule). Locally read issuer and model are shown as **claimed (signer not verified)**.
-- XMP: a small own scanner that finds the XMP packet (`<x:xmpmeta` … `</x:xmpmeta>`) in the raw bytes, which works for JPEG, PNG (uncompressed iTXt), WebP, GIF and AVIF/HEIC alike. Compressed PNG text chunks are not supported (documented limitation). No XMP library.
+- XMP: a small own scanner that finds the XMP packet (`<x:xmpmeta` … `</x:xmpmeta>`) in the raw bytes, which works for JPEG, PNG (uncompressed iTXt), WebP, GIF and AVIF/HEIC alike. A prefix is only a local alias, so the property is matched by its namespace URI: Adobe's `Iptc4xmpExt:` and Exiv2's `iptcExt:` are the same property. Compressed PNG text chunks are not supported (documented limitation). No XMP library.
 - No remote code, no analytics, no external fonts.
 
 ### Planned file layout
@@ -214,7 +215,7 @@ Triggered only by a context-menu click. Input: `info.srcUrl`, `info.frameUrl`, `
 5. **Cache lookup** by SHA-256 (`result:<hash>`). If found, use it.
 6. **Local checks** (free, offline, nothing leaves the machine):
    - C2PA: `WasmReader.fromBytes(mediaType, bytes, '{"verify":{"remote_manifest_fetch":false,"ocsp_fetch":false}}')`. Mapping in section 4 "Result model".
-   - XMP: scan for the XMP packet and read `Iptc4xmpExt:DigitalSourceType` (match on the IPTC URI ending). Generator names in `xmp:CreatorTool` / software fields are a weak hint only.
+   - XMP: scan for the XMP packet and read `DigitalSourceType` from the IPTC Extension namespace (match on the IPTC URI ending; the property prefix is resolved from the packet's `xmlns` declarations, so `Iptc4xmpExt:` and `iptcExt:` both work). Generator names in `xmp:CreatorTool` / software fields are a weak hint only.
 7. **Verdict, cache, notify.** Compute the verdict, write `result:<hash>` and `check:<checkId>`, send `checkUpdate {status: "done"}` with `openai` availability (`no_key` if no key is stored; the media type does not disable the button, see step 8.4).
 8. **OpenAI check** (only after the user clicks the popup button):
    1. Content script sends `openaiRequest {checkId}`. The worker loads `check:<checkId>` and checks that `sender.tab.id` and `sender.frameId` match. Missing record (browser restarted, extension reloaded): `check_expired` ("check the image again").
@@ -341,6 +342,7 @@ Not an AI signal (show details in the popup, no TÄ):
 **Fixtures** (`test/fixtures/`):
 - `ai-test-halloween.png`: original ChatGPT image. Expect OpenAI c2pa `detected` (trusted) and synthid `detected`. Expect local C2PA `present` with an AI action, claimed issuer "OpenAI OpCo, LLC", claimed model "ChatGPT / gpt-image".
 - `ai-tes-iceland.jpg`: phone photo. Expect local C2PA `absent`, XMP `not_detected`, OpenAI both `not_detected` with c2pa `not_present`.
+- `ai-meta-bunny.jpg`: Meta AI image. Expect local C2PA `absent` (no manifest at all) and XMP `detected` alone — the file carries the IPTC `DigitalSourceType` `trainedAlgorithmicMedia` as loose XMP, under Exiv2's `iptcExt:` prefix (not `Iptc4xmpExt:`), with no `CreatorTool`. This is the fixture that pins the XMP path: it is the only signal, so the verdict is `ai_signal` from XMP or not at all.
 - `ai-test-halloween-resaved.jpg`: JPEG re-save of the halloween image (metadata stripped, made outside the extension). Expect local C2PA `absent`, XMP `not_detected`, OpenAI c2pa `not_detected` and synthid `detected`.
 - `openai-halloween.json`, `openai-iceland.json`, `openai-halloween-resaved.json`: real OpenAI responses, used as parser fixtures.
 - Small test inputs (XMP packets in JPEG/PNG/WebP/GIF containers, a PNG with a remote manifest reference, truncated files) are built by test helpers in code, not committed as files. Do **not** commit a file over 50 MiB: test the size limit with a fake stream.
@@ -384,7 +386,7 @@ Not an AI signal (show details in the popup, no TÄ):
 25. M2: an image flagged earlier whose recheck is `incomplete` keeps its TÄ badge; a recheck that finds no signal removes it.
 19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
 26. M3 (#16): with the extension loaded, check the same image twice in one browser session and confirm the session cache is populated (`chrome.storage.session` in the worker DevTools) and cleared after a browser restart; entries must never contain image bytes.
-27. M3 (#20): check the same image twice in a session: both checks finish and the second is served from `chrome.storage.session` (`result:<hash>` present in the worker DevTools); an image whose only AI signal is XMP `DigitalSourceType` shows TÄ. The second check still downloads the bytes (the SHA-256 key needs them); the cache skips the local C2PA/XMP work, which has no log line of its own.
+27. M3 (#20): check the same image twice in a session: both checks finish and the second is served from `chrome.storage.session` (`result:<hash>` present in the worker DevTools); an image whose only AI signal is XMP `DigitalSourceType` shows TÄ (`test/fixtures/ai-meta-bunny.jpg` is such a file: no C2PA at all, loose XMP under the Exiv2 prefix `iptcExt:`). The second check still downloads the bytes (the SHA-256 key needs them); the cache skips the local C2PA/XMP work, which has no log line of its own.
 
 ---
 
