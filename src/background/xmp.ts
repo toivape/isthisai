@@ -6,6 +6,8 @@
 // Known limits (regex scan, not an XML parser):
 // - Property prefixes are read from the packet's xmlns declarations; a packet
 //   that omits them is not read (real XMP declares them).
+// - Prefix bindings are packet-wide, not scoped: a prefix bound to the IPTC URI
+//   in one element and to another URI elsewhere is misread as IPTC.
 // - The rdf: prefix on rdf:resource is assumed conventional, not resolved.
 // - UTF-16 packets are not decoded (reported as not_detected).
 // - The attribute form can match the same text inside another property's value.
