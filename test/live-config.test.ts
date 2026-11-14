@@ -2,6 +2,7 @@ import { readdirSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import base from "../vite.config";
 import live from "../vitest.live.config";
+import { FETCH_DEADLINE_MS } from "../src/shared/limits";
 
 // Issue #19: the live suite must be reachable only through `npm run test:live`.
 // A live test silently joining `npm test` would either call the network in CI
@@ -30,5 +31,11 @@ describe("test:live is isolated from npm test", () => {
     const files = readdirSync("test/live");
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) expect(file, file).toMatch(/\.live\.ts$/);
+  });
+
+  test("the live test timeout leaves the client's deadline in charge", () => {
+    // Otherwise a slow-but-valid response fails on vitest's 5 s default, and the
+    // upload outlives the test that started it.
+    expect(live.test?.testTimeout).toBeGreaterThan(FETCH_DEADLINE_MS);
   });
 });

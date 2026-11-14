@@ -34,7 +34,7 @@ function synthid(overrides: Record<string, unknown> = {}): Record<string, unknow
   return { type: "synthid", outcome: "not_detected", model: null, generated_at: null, ...overrides };
 }
 
-describe("buildProvenanceUpload", () => {
+describe("buildRequest", () => {
   test("posts to the documented endpoint", () => {
     expect(PROVENANCE_URL).toBe("https://api.openai.com/v1/content_provenance_checks");
   });
@@ -87,7 +87,7 @@ describe("buildProvenanceUpload", () => {
   });
 });
 
-describe("parseProvenanceBody: the real responses", () => {
+describe("parseResponse: the real responses", () => {
   test("parses the halloween fixture: c2pa detected trusted with OpenAI issuer, synthid detected", () => {
     expect(parseResponse(fixtureBody("openai-halloween.json"), false)).toStrictEqual({
       ok: true,
@@ -136,7 +136,7 @@ describe("parseProvenanceBody: the real responses", () => {
   });
 });
 
-describe("parseProvenanceBody: nulls, order and unknown entries", () => {
+describe("parseResponse: nulls, order and unknown entries", () => {
   test("maps a null issuer, model and generated_at to absent, not the string null", () => {
     // toStrictEqual, not toEqual: a key assigned undefined slips past a loose
     // comparison and is still a phantom field in the stored result.
@@ -190,7 +190,7 @@ describe("parseProvenanceBody: nulls, order and unknown entries", () => {
   });
 });
 
-describe("parseProvenanceBody: validation_state", () => {
+describe("parseResponse: validation_state", () => {
   // The verdict rule keys on trusted and valid (trusted/valid can be an AI
   // signal; invalid cannot), so every documented value must survive parsing.
   test("parses each documented validation_state", () => {
@@ -240,7 +240,7 @@ describe("parseProvenanceBody: validation_state", () => {
   });
 });
 
-describe("parseProvenanceBody: contract violations", () => {
+describe("parseResponse: contract violations", () => {
   test("an image response without a synthid entry is bad_response", () => {
     expect(parseResponse(body([c2pa()]), false)).toEqual({ ok: false, error: { code: "bad_response" } });
   });
@@ -275,8 +275,21 @@ describe("retryAfterSeconds", () => {
     expect(retryAfterSeconds("0")).toBe(0);
   });
 
-  test("an HTTP-date is not a number of seconds", () => {
-    expect(retryAfterSeconds("Wed, 21 Oct 2026 07:28:00 GMT")).toBeUndefined();
+  test("an HTTP-date becomes the remaining seconds against the caller's clock", () => {
+    // RFC 9110 allows either form; a date needs a clock to become a countdown,
+    // so the clock is a parameter rather than a hidden Date.now().
+    const now = Date.parse("2026-10-21T07:27:00Z");
+    expect(retryAfterSeconds("Wed, 21 Oct 2026 07:28:00 GMT", now)).toBe(60);
+  });
+
+  test("an HTTP-date that is already in the past means retry now", () => {
+    const now = Date.parse("2026-10-21T07:30:00Z");
+    expect(retryAfterSeconds("Wed, 21 Oct 2026 07:28:00 GMT", now)).toBe(0);
+  });
+
+  test("an unparseable value is undefined", () => {
+    expect(retryAfterSeconds("soon")).toBeUndefined();
+    expect(retryAfterSeconds("n/a")).toBeUndefined();
   });
 
   test("an absent or empty header is undefined", () => {
@@ -291,7 +304,7 @@ describe("retryAfterSeconds", () => {
   });
 });
 
-describe("mapProvenanceError", () => {
+describe("mapHttpError", () => {
   test("400 maps to http_400", () => {
     expect(mapHttpError(400, null)).toEqual({ code: "http_400" });
   });
@@ -312,8 +325,13 @@ describe("mapProvenanceError", () => {
     expect(mapHttpError(429, null)).toStrictEqual({ code: "rate_limited" });
   });
 
-  test("429 with an HTTP-date Retry-After maps to rate_limited without a number", () => {
-    expect(mapHttpError(429, "Wed, 21 Oct 2026 07:28:00 GMT")).toStrictEqual({ code: "rate_limited" });
+  test("429 with an HTTP-date Retry-After maps to the remaining seconds", () => {
+    const now = Date.parse("2026-10-21T07:27:00Z");
+    expect(mapHttpError(429, "Wed, 21 Oct 2026 07:28:00 GMT", now)).toEqual({ code: "rate_limited", retryAfterSec: 60 });
+  });
+
+  test("429 with an unparseable Retry-After maps to rate_limited with no retryAfterSec", () => {
+    expect(mapHttpError(429, "soon")).toStrictEqual({ code: "rate_limited" });
   });
 
   test("other 4xx maps to http_4xx", () => {
@@ -445,5 +463,16 @@ describe("readProvenanceResponse", () => {
       text: () => Promise.reject(new Error("connection lost")),
     } as unknown as Response;
     expect(await readProvenanceResponse(broken, false)).toEqual({ ok: false, error: { code: "network" } });
+  });
+
+  test("a body read aborted by our own deadline is a timeout, not a network error", async () => {
+    // The deadline can expire after the headers arrive, while the body is still
+    // being read; that abort is ours, so it must not read as a network fault.
+    const aborted = {
+      status: 200,
+      headers: new Headers(),
+      text: () => Promise.reject(new DOMException("Aborted", "AbortError")),
+    } as unknown as Response;
+    expect(await readProvenanceResponse(aborted, false)).toEqual({ ok: false, error: { code: "timeout" } });
   });
 });

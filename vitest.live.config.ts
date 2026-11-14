@@ -7,5 +7,9 @@ export default defineConfig({
   test: {
     include: ["test/live/*.live.ts"],
     env: { ISTHISAI_LIVE: "1" },
+    // The client allows one upload up to FETCH_DEADLINE_MS (25 s). Vitest's 5 s
+    // default would fail a legitimately slow response before the client judged
+    // it, and would leave that upload running into the next test.
+    testTimeout: 30_000,
   },
 });

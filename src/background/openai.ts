@@ -115,21 +115,29 @@ export function parseResponse(text: string, serverConverted: boolean): ParsedPro
   return { ok: true, result: { state: "done", serverConverted, c2pa, synthid } };
 }
 
-// Retry-After is delta-seconds or an HTTP-date (RFC 9110). Only the numeric
-// form is a countdown; a date is not a number of seconds to show the user.
-export function retryAfterSeconds(header: string | null): number | undefined {
+// Retry-After is delta-seconds or an HTTP-date (RFC 9110); the two forms are
+// disjoint, so a malformed number is rejected rather than falling through to
+// Date.parse, which happily reads "1.5" as a date in 2001. A date only becomes
+// a countdown with a clock, so the clock is a parameter.
+const DELTA_FORM = /^[+-]?\d*\.?\d+$/;
+
+export function retryAfterSeconds(header: string | null, now: number = Date.now()): number | undefined {
   if (header === null) return undefined;
   const trimmed = header.trim();
-  if (trimmed === "") return undefined;
-  const seconds = Number(trimmed);
-  return Number.isInteger(seconds) && seconds >= 0 ? seconds : undefined;
+  if (DELTA_FORM.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isInteger(seconds) && seconds >= 0 ? seconds : undefined;
+  }
+  const at = Date.parse(trimmed);
+  if (Number.isNaN(at)) return undefined;
+  return Math.max(0, Math.ceil((at - now) / 1000));
 }
 
 // Only a non-2xx status reaches here, so anything else is a caller bug and
 // must not read as a result.
-export function mapHttpError(status: number, retryAfter: string | null): OpenAiError {
+export function mapHttpError(status: number, retryAfter: string | null, now: number = Date.now()): OpenAiError {
   if (status === 429) {
-    const seconds = retryAfterSeconds(retryAfter);
+    const seconds = retryAfterSeconds(retryAfter, now);
     return seconds === undefined ? { code: "rate_limited" } : { code: "rate_limited", retryAfterSec: seconds };
   }
   if (status === 400) return { code: "http_400" };
@@ -140,6 +148,8 @@ export function mapHttpError(status: number, retryAfter: string | null): OpenAiE
   return { code: "bad_response" };
 }
 
+const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
+
 export async function readProvenanceResponse(response: Response, serverConverted: boolean): Promise<ParsedProvenance> {
   if (response.status < 200 || response.status >= 300) {
     return { ok: false, error: mapHttpError(response.status, response.headers.get("retry-after")) };
@@ -147,13 +157,13 @@ export async function readProvenanceResponse(response: Response, serverConverted
   let text: string;
   try {
     text = await response.text();
-  } catch {
-    return { ok: false, error: { code: "network" } };
+  } catch (error) {
+    // The deadline can expire after the headers arrive, while the body is still
+    // being read: that abort is ours, not the network's.
+    return { ok: false, error: { code: isAbortError(error) ? "timeout" : "network" } };
   }
   return parseResponse(text, serverConverted);
 }
-
-const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
 
 export interface SendProvenanceDeps {
   fetchImpl?: typeof fetch;
