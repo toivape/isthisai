@@ -128,6 +128,10 @@ describe("scanXmp: fixtures", () => {
   test("halloween PNG: its DigitalSourceType bytes are in C2PA, not an XMP packet", () => {
     expect(scanXmp(fixture("ai-test-halloween.png"))).toEqual(NOT_DETECTED);
   });
+
+  test("meta AI JPEG: loose XMP under the Exiv2 prefix iptcExt, no C2PA", () => {
+    expect(scanXmp(fixture("ai-meta-bunny.jpg"))).toEqual(DETECTED);
+  });
 });
 
 describe("scanXmp: XML serialization forms", () => {
@@ -196,9 +200,71 @@ describe("scanXmp: XML serialization forms", () => {
 
   test("a property immediately before the end marker is still read", () => {
     // The packet slice must include the whole end marker; cutting it short
-    // would drop this trailing property.
-    const packet = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:Description Iptc4xmpExt:DigitalSourceType="${TRAINED}"/></x:xmpmeta>`;
+    // would drop this trailing property. The declaration sits on an ancestor
+    // element: an xmlns is in scope for the whole subtree, not just its own tag.
+    const packet = `<x:xmpmeta xmlns:x="adobe:ns:meta/" xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/"><rdf:Description Iptc4xmpExt:DigitalSourceType="${TRAINED}"/></x:xmpmeta>`;
     expect(scanXmp(jpegWithXmpPacket(packet))).toEqual(DETECTED);
+  });
+});
+
+// XMP prefixes are arbitrary local aliases; only the namespace URI identifies a
+// property. Exiv2 serialises the IPTC Extension URI as "iptcExt:" and Meta AI
+// downloads carry that shape, while Adobe writes "Iptc4xmpExt:".
+describe("scanXmp: the namespace prefix is a local alias", () => {
+  const IPTC_NS = "http://iptc.org/std/Iptc4xmpExt/2008-02-29/";
+  const XMP_NS = "http://ns.adobe.com/xap/1.0/";
+  const RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+
+  // `attributes` go inside the rdf:Description tag, `inner` becomes its content.
+  const packet = (attributes: string, inner = ""): string =>
+    `<x:xmpmeta xmlns:x="adobe:ns:meta/">` +
+    `<rdf:RDF xmlns:rdf="${RDF_NS}">` +
+    `<rdf:Description rdf:about="" ${attributes}>${inner}</rdf:Description>` +
+    `</rdf:RDF></x:xmpmeta>`;
+
+  test("the Exiv2 prefix iptcExt, as Meta AI writes it, is detected", () => {
+    expect(scanXmp(jpegWithXmpPacket(packet(`xmlns:iptcExt="${IPTC_NS}" iptcExt:DigitalSourceType="${TRAINED}"`)))).toEqual(DETECTED);
+  });
+
+  test("an arbitrary prefix bound to the IPTC URI is detected", () => {
+    expect(scanXmp(jpegWithXmpPacket(packet(`xmlns:v="${IPTC_NS}" v:DigitalSourceType="${TRAINED}"`)))).toEqual(DETECTED);
+  });
+
+  test("an element in the default namespace of the IPTC URI is detected", () => {
+    expect(scanXmp(jpegWithXmpPacket(packet(`xmlns="${IPTC_NS}"`, `<DigitalSourceType>${TRAINED}</DigitalSourceType>`)))).toEqual(DETECTED);
+  });
+
+  test("a DigitalSourceType in another namespace is not read", () => {
+    const foreign = packet(`xmlns:other="http://example.com/other" other:DigitalSourceType="${TRAINED}"`);
+    expect(scanXmp(jpegWithXmpPacket(foreign))).toEqual(NOT_DETECTED);
+  });
+
+  test("CreatorTool is read under a non-conventional prefix bound to the XMP URI", () => {
+    const aliased = packet(`xmlns:ns1="${XMP_NS}" ns1:CreatorTool="Midjourney"`);
+    expect(scanXmp(jpegWithXmpPacket(aliased))).toEqual({
+      state: "not_detected",
+      generatorHint: "Midjourney",
+    } satisfies LocalXmp);
+  });
+
+  test("the default namespace does not bind an unprefixed attribute", () => {
+    // Only element names take the default namespace; an unprefixed attribute is
+    // in no namespace, so this is not an IPTC property.
+    expect(scanXmp(jpegWithXmpPacket(packet(`xmlns="${IPTC_NS}" DigitalSourceType="${TRAINED}"`)))).toEqual(NOT_DETECTED);
+  });
+
+  test("a prefix is matched literally, not as a pattern", () => {
+    // "v.1" declares the URI, "vX1" (used below) does not: an unescaped "."
+    // would match the X and read a property the packet never bound.
+    expect(scanXmp(jpegWithXmpPacket(packet(`xmlns:v.1="${IPTC_NS}" vX1:DigitalSourceType="${TRAINED}"`)))).toEqual(NOT_DETECTED);
+  });
+
+  test("a prefix containing a dot resolves to itself", () => {
+    expect(scanXmp(jpegWithXmpPacket(packet(`xmlns:v.1="${IPTC_NS}" v.1:DigitalSourceType="${TRAINED}"`)))).toEqual(DETECTED);
+  });
+
+  test("whitespace around the xmlns = is tolerated", () => {
+    expect(scanXmp(jpegWithXmpPacket(packet(`xmlns:v = "${IPTC_NS}" v:DigitalSourceType="${TRAINED}"`)))).toEqual(DETECTED);
   });
 });
 

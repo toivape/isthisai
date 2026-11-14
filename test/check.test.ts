@@ -134,6 +134,19 @@ describe("runCheckSteps", () => {
     expect(done.result.verdict).toBe("no_signal");
   });
 
+  test("meta bunny fixture: no C2PA, the loose XMP alone gives verdict ai_signal", async () => {
+    const fixture = new Uint8Array(readFileSync("test/fixtures/ai-meta-bunny.jpg"));
+    const fetchImpl = vi.fn(async () => new Response(fixture, { status: 200 }));
+    const realReadC2pa = (await import("../src/background/c2pa")).readC2pa;
+    const { deps, updates } = fakeDeps({ fetchImpl, readC2pa: realReadC2pa });
+    await runCheckSteps(deps, { ...POSITION, srcUrl: "https://page.example/meta-bunny.jpg", checkId: "c1" });
+    const done = updates.sent[1];
+    if (done.status !== "done") throw new Error("expected done");
+    expect(done.result.localC2pa).toEqual({ manifest: "absent", aiAction: false });
+    expect(done.result.localXmp).toEqual({ state: "detected" });
+    expect(done.result.verdict).toBe("ai_signal");
+  });
+
   test("awaits an asynchronous sendUpdate so the terminal update lands before the pipeline resolves", async () => {
     const fetchImpl = vi.fn(async () => pngResponse());
     const { deps } = fakeDeps({ fetchImpl });
@@ -161,7 +174,7 @@ describe("runCheckSteps: XMP (#20)", () => {
   const TRAINED = "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia";
 
   test("an image with only an XMP DigitalSourceType gives verdict ai_signal", async () => {
-    const packet = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description Iptc4xmpExt:DigitalSourceType="${TRAINED}"/></rdf:RDF></x:xmpmeta>`;
+    const packet = `<x:xmpmeta xmlns:x="adobe:ns:meta/" xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/"><rdf:RDF><rdf:Description Iptc4xmpExt:DigitalSourceType="${TRAINED}"/></rdf:RDF></x:xmpmeta>`;
     const bytes = jpegWithXmpPacket(packet);
     const fetchImpl = vi.fn(async () => new Response(new Uint8Array(bytes), { status: 200 }));
     const readC2pa = vi.fn(async () => ({ manifest: "absent", aiAction: false })) as unknown as typeof import("../src/background/c2pa").readC2pa;
@@ -174,7 +187,7 @@ describe("runCheckSteps: XMP (#20)", () => {
   });
 
   test("XMP is scanned on the same bytes as C2PA, and a generator hint alone stays no_signal", async () => {
-    const packet = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description xmp:CreatorTool="ChatGPT"/></rdf:RDF></x:xmpmeta>`;
+    const packet = `<x:xmpmeta xmlns:x="adobe:ns:meta/" xmlns:xmp="http://ns.adobe.com/xap/1.0/"><rdf:RDF><rdf:Description xmp:CreatorTool="ChatGPT"/></rdf:RDF></x:xmpmeta>`;
     const fetchImpl = vi.fn(async () => new Response(new Uint8Array(jpegWithXmpPacket(packet)), { status: 200 }));
     const readC2pa = vi.fn(async () => ({ manifest: "absent", aiAction: false })) as unknown as typeof import("../src/background/c2pa").readC2pa;
     const { deps, updates } = fakeDeps({ fetchImpl, readC2pa, scanXmp });
