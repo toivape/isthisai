@@ -119,11 +119,13 @@ describe("sniffMediaType", () => {
 });
 
 describe("isOpenAiType", () => {
-  test("is true only for PNG, JPEG and WebP", () => {
+  test("is true for PNG, JPEG, WebP and GIF", () => {
+    // The API documents GIF support (image/gif, including animated GIFs);
+    // AVIF and HEIC still require the server-converted re-fetch.
     expect(isOpenAiType("image/png")).toBe(true);
     expect(isOpenAiType("image/jpeg")).toBe(true);
     expect(isOpenAiType("image/webp")).toBe(true);
-    expect(isOpenAiType("image/gif")).toBe(false);
+    expect(isOpenAiType("image/gif")).toBe(true);
     expect(isOpenAiType("image/avif")).toBe(false);
     expect(isOpenAiType("image/heic")).toBe(false);
     expect(isOpenAiType("unknown")).toBe(false);
