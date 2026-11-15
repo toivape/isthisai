@@ -51,6 +51,9 @@ describe("isMutable", () => {
     expect(isMutable("src/content/index.ts")).toBe(false);
     expect(isMutable("src/content/readBlob.ts")).toBe(false);
     expect(isMutable("src/confirm/confirm.ts")).toBe(false);
+    // Excluded by file, not by directory: the confirmation window's view model
+    // is pure and unit-tested, so it must stay in the mutation scope.
+    expect(isMutable("src/confirm/view.ts")).toBe(true);
     expect(isMutable("src/options/options.ts")).toBe(false);
     expect(isMutable("src/shared/i18n.ts")).toBe(false);
     expect(isMutable("src/shared/limits.ts")).toBe(false);

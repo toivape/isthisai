@@ -21,7 +21,16 @@
     "message": "Send this image to OpenAI?"
   },
   "confirm_body": {
-    "message": "This image will be sent to OpenAI to check for provenance signals. Checks may be billed to your OpenAI account."
+    "message": "This image will be sent to OpenAI to check for provenance signals. Checks are currently free, but strict rate limits apply."
+  },
+  "confirm_origin": {
+    "message": "Image from: $1"
+  },
+  "confirm_type": {
+    "message": "Image type: $1"
+  },
+  "confirm_size": {
+    "message": "Size: $1"
   },
   "confirm_upload_button": {
     "message": "Upload"
