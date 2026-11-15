@@ -108,7 +108,16 @@
     "message": "Lähetetäänkö tämä kuva OpenAIlle?"
   },
   "confirm_body": {
-    "message": "Kuva lähetetään OpenAIlle tekoälyn merkkien tarkistamista varten. Tarkistus voidaan veloittaa OpenAI-tililtäsi."
+    "message": "Kuva lähetetään OpenAIlle tekoälyn merkkien tarkistamista varten. Tarkistukset ovat tällä hetkellä maksuttomia, mutta niihin sovelletaan tiukkoja käyttörajoja."
+  },
+  "confirm_origin": {
+    "message": "Kuvan lähde: $1"
+  },
+  "confirm_type": {
+    "message": "Kuvan tyyppi: $1"
+  },
+  "confirm_size": {
+    "message": "Koko: $1"
   },
   "confirm_upload_button": {
     "message": "Lähetä"

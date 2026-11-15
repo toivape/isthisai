@@ -8,7 +8,7 @@ import {
   readBlobRequest,
   sha256Hex,
 } from "../src/background/fetchImage";
-import { needsPermissionRequest, originsToCheck } from "../src/background/permissions";
+import { needsPermissionRequest, originsToCheck, httpOrigin } from "../src/background/permissions";
 import { decodeBase64, encodeBase64 } from "../src/shared/base64";
 import { MAX_BLOB_BYTES, MAX_IMAGE_BYTES } from "../src/shared/limits";
 import { isReadBlob } from "../src/shared/types";
@@ -254,6 +254,19 @@ describe("decodeDataUrl", () => {
     expect(decodeDataUrl("data:text/plain;base64,aGk=")).toEqual({ kind: "error", error: { code: "unsupported_type" } });
     expect(decodeDataUrl("data:image/png;base64,!!!")).toEqual({ kind: "error", error: { code: "unsupported_type" } });
     expect(decodeDataUrl("https://example.com/x.png")).toEqual({ kind: "error", error: { code: "unsupported_type" } });
+  });
+});
+
+describe("httpOrigin", () => {
+  test("gives the origin for an http(s) url and nothing otherwise", () => {
+    expect(httpOrigin("https://page.example/i.png?a=1")).toBe("https://page.example");
+    expect(httpOrigin("http://page.example:8080/i.png")).toBe("http://page.example:8080");
+    // The trap: URL.origin for an opaque origin is the *string* "null", which
+    // must never be rendered as the image's source.
+    expect(httpOrigin("data:image/png;base64,AAA")).toBeUndefined();
+    expect(httpOrigin("blob:https://page.example/uuid")).toBeUndefined();
+    expect(httpOrigin("about:blank")).toBeUndefined();
+    expect(httpOrigin("not a url")).toBeUndefined();
   });
 });
 

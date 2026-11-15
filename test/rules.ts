@@ -9,7 +9,8 @@ export type PerFileRuleId =
   | "api-key-placement"
   | "locale-forbidden-words"
   | "manifest-clean"
-  | "no-dynamic-import";
+  | "no-dynamic-import"
+  | "no-ask-again";
 
 export type RuleId = PerFileRuleId | "locale-parity";
 
@@ -228,6 +229,32 @@ const manifestClean: Rule = (path, content) => {
   return violations;
 };
 
+// Hard rule 5: the OpenAI upload is confirmed before every upload, with no
+// "don't ask again". The confirmation window is the only place a control like
+// that could be added, and it renders its control text from the confirm_* keys
+// in _locales, so both are scanned.
+const ASK_AGAIN = /don'?t\s+ask\s+again|ask\s+again|remember\s+(this\s+)?choice|kysy\s+uudelleen/i;
+const ASK_AGAIN_MESSAGE = "a 'don't ask again' control is forbidden (hard rule 5)";
+
+const noAskAgain: Rule = (path, content) => {
+  if (path.startsWith("src/confirm/")) return matches(path, content, "no-ask-again", ASK_AGAIN, ASK_AGAIN_MESSAGE);
+  if (!path.startsWith("_locales/")) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return [];
+  }
+  if (!isObject(parsed)) return [];
+  const violations: Violation[] = [];
+  walkMessages(parsed, (key, text) => {
+    if (key.startsWith("confirm_") && ASK_AGAIN.test(text)) {
+      violations.push(violation("no-ask-again", path, 0, `${ASK_AGAIN_MESSAGE} in ${key}`));
+    }
+  });
+  return violations;
+};
+
 export const RULES: Record<PerFileRuleId, Rule> = {
   "no-reencode": noReencode,
   "no-content-type": noContentType,
@@ -237,6 +264,7 @@ export const RULES: Record<PerFileRuleId, Rule> = {
   "locale-forbidden-words": localeForbiddenWords,
   "manifest-clean": manifestClean,
   "no-dynamic-import": noDynamicImport,
+  "no-ask-again": noAskAgain,
 };
 
 export function ruleViolations(files: RepoFile[]): Violation[] {
