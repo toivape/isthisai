@@ -78,6 +78,16 @@ describe("PendingConsents", () => {
     await expect(answer).resolves.toBe(false);
   });
 
+  test("a late answer after the window was removed is unknown, not a second decision", async () => {
+    // The page's own close signal can arrive after windows.onRemoved already
+    // declined the check; it must not resolve the same check twice.
+    const pending = new PendingConsents(CONFIRM_PREFIX);
+    const answer = pending.open("c1");
+    pending.decline("c1");
+    await expect(answer).resolves.toBe(false);
+    expect(pending.answer("c1", confirmSender, true)).toBe("unknown");
+  });
+
   test("declining a check with no open window is a no-op", () => {
     const pending = new PendingConsents(CONFIRM_PREFIX);
     expect(pending.decline("missing")).toBe(false);

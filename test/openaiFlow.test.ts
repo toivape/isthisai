@@ -100,6 +100,8 @@ interface HarnessOptions {
   reloadError?: CheckErrorCode;
   storeWriteThrows?: boolean;
   fetchImpl?: typeof fetch;
+  /** Overrides the in-memory store (for storage-failure cases). */
+  store?: CacheStore;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -110,13 +112,14 @@ function harness(options: HarnessOptions = {}) {
   if (options.record !== undefined) data.set(`check:${options.record.checkId}`, options.record);
   if (options.stored !== undefined) data.set(`result:${options.stored.imageHash}`, options.stored);
 
-  const store: CacheStore = {
+  const memory: CacheStore = {
     get: async (key) => data.get(key),
     set: async (key, value) => {
       if (options.storeWriteThrows === true) throw new Error("Session storage quota bytes exceeded");
       data.set(key, value);
     },
   };
+  const store = options.store ?? memory;
   const readKey = vi.fn(async () => options.key);
   const requestConsent = vi.fn(async (request: { checkId: string; path: string }) => {
     consentRequests.push(request);
@@ -258,6 +261,43 @@ describe("runOpenAiFlow: request validation", () => {
     expect(await run(h.deps)).toEqual({ kind: "error", error: { code: "check_expired" } });
     expect(h.consentRequests).toEqual([]);
     expect(h.reloadCalls).toEqual([]);
+  });
+
+  test("a store that rejects on read is logged and gives check_expired", async () => {
+    const store: CacheStore = {
+      get: async () => {
+        throw new Error("session storage unavailable");
+      },
+      set: async () => {},
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const h = harness({ store, reload: undefined, key: KEY });
+      expect(await run(h.deps)).toEqual({ kind: "error", error: { code: "check_expired" } });
+      expect(errorSpy).toHaveBeenCalledWith("cache read failed", expect.any(Error));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  test("a result read failure is logged and gives check_expired", async () => {
+    const f = await fixture(minimalPng(), "image/png");
+    const store: CacheStore = {
+      get: async (key) => {
+        if (key === `check:${f.record.checkId}`) return f.record;
+        throw new Error("session storage unavailable");
+      },
+      set: async () => {},
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const h = harness({ store, reload: f.collected, key: KEY });
+      expect(await run(h.deps)).toEqual({ kind: "error", error: { code: "check_expired" } });
+      expect(errorSpy).toHaveBeenCalledWith("cache read failed", expect.any(Error));
+      expect(h.reloadCalls).toEqual([]);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 
