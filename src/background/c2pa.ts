@@ -127,18 +127,24 @@ const BINDING_MATCH_CODES = [
   "assertion.boxesHash.match",
   "assertion.collectionHash.match",
 ];
-// Failures about the signer, not the content. Every other failure code, including
-// ones a future c2pa-wasm adds, makes integrity unverified. claim.malformed is
+// Failures about the signer, not the content. Every other failure, including
+// codes a future c2pa-wasm adds, makes integrity unverified. claim.malformed is
 // here because the Microsoft signer reports it for an undecodable soft-binding
 // assertion.
-const TOLERATED_INTEGRITY_FAILURES = new Set(["signingCredential.untrusted", "signingCredential.invalid", "claim.malformed"]);
+const TOLERATED_INTEGRITY_FAILURES = new Set(["signingCredential.untrusted", "claim.malformed"]);
+// signingCredential.invalid covers every certificate-profile failure; only an EKU
+// outside the profile is tolerated. Matches c2pa-rs 0.91.7 certificate_profile.rs
+// verbatim, so a c2pa-wasm bump that rewords it fails closed.
+const EKU_REJECTION_EXPLANATION = "certificate missing required EKU";
 
 function statusCodesOf(entries: unknown[]): unknown[] {
   return entries.map((entry) => (isObject(entry) ? entry.code : undefined));
 }
 
-function isToleratedIntegrityFailure(code: unknown): boolean {
-  if (typeof code !== "string") return false;
+function isToleratedIntegrityFailure(entry: unknown): boolean {
+  if (!isObject(entry) || typeof entry.code !== "string") return false;
+  const code = entry.code;
+  if (code === "signingCredential.invalid") return entry.explanation === EKU_REJECTION_EXPLANATION;
   return TOLERATED_INTEGRITY_FAILURES.has(code) || TOLERATED_FAILURE_PREFIXES.some((prefix) => code.startsWith(prefix));
 }
 
@@ -149,7 +155,7 @@ function integrityOf(validationResults: unknown): "verified" | "unverified" {
   const successCodes = new Set(statusCodesOf(success));
   const signatureValidated = SIGNATURE_CODES.every((code) => successCodes.has(code));
   const bindingMatched = BINDING_MATCH_CODES.some((code) => successCodes.has(code));
-  const onlyToleratedFailures = statusCodesOf(failure).every(isToleratedIntegrityFailure);
+  const onlyToleratedFailures = failure.every(isToleratedIntegrityFailure);
   return signatureValidated && bindingMatched && onlyToleratedFailures ? "verified" : "unverified";
 }
 

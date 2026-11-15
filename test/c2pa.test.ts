@@ -143,6 +143,10 @@ const intactResults = {
   },
 };
 
+// The explanation c2pa-rs 0.91.7 logs when the signer's EKU is not one the C2PA
+// profile allows (certificate_profile.rs).
+const EKU_REJECTION = { code: "signingCredential.invalid", explanation: "certificate missing required EKU" };
+
 // The Microsoft shape: the binding is intact, but the signer certificate does
 // not meet the C2PA profile, which makes the manifest invalid without any
 // tampering.
@@ -150,7 +154,7 @@ const rejectedSignerResults = {
   activeManifest: {
     success: intactResults.activeManifest.success,
     informational: [],
-    failure: [{ code: "signingCredential.untrusted" }, { code: "signingCredential.invalid" }],
+    failure: [{ code: "signingCredential.untrusted" }, EKU_REJECTION],
   },
 };
 
@@ -640,10 +644,23 @@ describe("mapC2paStore: the integrity axis", () => {
         activeManifest: {
           success: intactResults.activeManifest.success,
           informational: [],
-          failure: [{ code: "signingCredential.invalid" }, { code }],
+          failure: [EKU_REJECTION, { code }],
         },
       };
       expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity, code).toBe("unverified");
+    }
+  });
+
+  test("unverified when the signer certificate is invalid for a reason other than its EKU", () => {
+    for (const failure of [
+      { code: "signingCredential.invalid", explanation: "certificate key length too short" },
+      { code: "signingCredential.invalid", explanation: "certificate 'any' EKU not allowed" },
+      { code: "signingCredential.invalid" },
+    ]) {
+      const results = {
+        activeManifest: { success: intactResults.activeManifest.success, informational: [], failure: [failure] },
+      };
+      expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity, failure.explanation).toBe("unverified");
     }
   });
 
@@ -652,7 +669,7 @@ describe("mapC2paStore: the integrity axis", () => {
       activeManifest: {
         success: intactResults.activeManifest.success,
         informational: [],
-        failure: [{ code: "signingCredential.invalid" }, { code: "cawg.identity.malformed" }],
+        failure: [EKU_REJECTION, { code: "cawg.identity.malformed" }],
       },
     };
     expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("verified");
