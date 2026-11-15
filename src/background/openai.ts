@@ -1,17 +1,16 @@
-// OpenAI Content Provenance API client (PLAN §4 step 8, issues #9 and #19).
-// Request building, response parsing and error mapping are pure so the flow in
-// openaiFlow.ts stays a thin orchestrator. Hard rules: the key travels only in
-// the Authorization header, the multipart request never sets its own content
-// type, and the file part carries the media type sniffed from magic bytes.
+// OpenAI Content Provenance API client (PLAN §4 step 8). The key travels only in
+// the Authorization header, and the file part carries the sniffed media type.
 
 import { FETCH_DEADLINE_MS } from "../shared/limits";
 import type { OpenAiError, OpenAiResultPart } from "../shared/types";
 
 export const PROVENANCE_URL = "https://api.openai.com/v1/content_provenance_checks";
 
-export type DoneOpenAiResult = Extract<OpenAiResultPart, { state: "done" }>;
+type DoneOpenAiResult = Extract<OpenAiResultPart, { state: "done" }>;
 
-export type ParsedProvenance = { ok: true; result: DoneOpenAiResult } | { ok: false; error: OpenAiError };
+export type ProvenanceSignals = Pick<DoneOpenAiResult, "c2pa" | "synthid">;
+
+export type ParsedProvenance = { ok: true; result: ProvenanceSignals } | { ok: false; error: OpenAiError };
 
 export interface ProvenanceRequest {
   url: string;
@@ -19,9 +18,8 @@ export interface ProvenanceRequest {
   body: FormData;
 }
 
-// The part's filename extension follows its media type. The API reads the type
-// from the part itself, so a mismatched name only adds risk; an unknown type
-// gets a bare name rather than an invented extension.
+export type BuiltRequest = { ok: true; request: ProvenanceRequest } | { ok: false; error: OpenAiError };
+
 const EXTENSIONS: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -29,18 +27,21 @@ const EXTENSIONS: Record<string, string> = {
   "image/gif": "gif",
 };
 
-export function buildRequest(key: string, bytes: Uint8Array, mediaType: string): ProvenanceRequest {
+// Anything outside visible ASCII makes fetch throw before sending, which would
+// otherwise surface as a network error.
+const SENDABLE_KEY = /^[\x21-\x7e]+$/;
+
+export function buildRequest(key: string, bytes: Uint8Array, mediaType: string): BuiltRequest {
+  const trimmed = key.trim();
+  if (!SENDABLE_KEY.test(trimmed)) return { ok: false, error: { code: "invalid_key" } };
+  // No Content-Type header: FormData sets it together with the boundary.
   const body = new FormData();
-  // FormData sets the multipart content type and its boundary itself; setting
-  // it by hand would drop the boundary.
-  // The cast is the lib's Uint8Array<ArrayBufferLike> vs BlobPart friction
-  // (same as sha256Hex's digest call); bytes.buffer would ignore a subarray's
-  // offset and upload the wrong slice.
+  // Cast only, not bytes.buffer: the buffer would ignore a subarray's offset.
   const part = bytes as unknown as ArrayBufferView<ArrayBuffer>;
   const extension = EXTENSIONS[mediaType];
   const filename = extension === undefined ? "image" : `image.${extension}`;
   body.append("file", new Blob([part], { type: mediaType }), filename);
-  return { url: PROVENANCE_URL, headers: { Authorization: `Bearer ${key}` }, body };
+  return { ok: true, request: { url: PROVENANCE_URL, headers: { Authorization: `Bearer ${trimmed}` }, body } };
 }
 
 type Outcome = "detected" | "not_detected";
@@ -58,8 +59,7 @@ function isValidation(value: unknown): value is Validation {
   return value === "trusted" || value === "valid" || value === "invalid" || value === "not_present";
 }
 
-// JSON null means "not reported", which is the same as absent: the string
-// "null" must never reach the UI or a verdict.
+// JSON null means "not reported" and maps to absent, never to the string "null".
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
@@ -68,11 +68,11 @@ function findResult(results: unknown[], type: string): Record<string, unknown> |
   return results.find((entry): entry is Record<string, unknown> => isObject(entry) && entry.type === type);
 }
 
-function parseC2pa(entry: Record<string, unknown>): DoneOpenAiResult["c2pa"] | undefined {
+function parseC2pa(entry: Record<string, unknown>): ProvenanceSignals["c2pa"] | undefined {
   if (!isOutcome(entry.outcome)) return undefined;
   const validation = entry.validation_state;
   if (validation !== undefined && validation !== null && !isValidation(validation)) return undefined;
-  const parsed: DoneOpenAiResult["c2pa"] = { outcome: entry.outcome };
+  const parsed: ProvenanceSignals["c2pa"] = { outcome: entry.outcome };
   if (isValidation(validation)) parsed.validation = validation;
   const issuer = optionalString(entry.issuer);
   if (issuer !== undefined) parsed.issuer = issuer;
@@ -83,9 +83,9 @@ function parseC2pa(entry: Record<string, unknown>): DoneOpenAiResult["c2pa"] | u
   return parsed;
 }
 
-function parseSynthid(entry: Record<string, unknown>): DoneOpenAiResult["synthid"] | undefined {
+function parseSynthid(entry: Record<string, unknown>): ProvenanceSignals["synthid"] | undefined {
   if (!isOutcome(entry.outcome)) return undefined;
-  const parsed: DoneOpenAiResult["synthid"] = { outcome: entry.outcome };
+  const parsed: ProvenanceSignals["synthid"] = { outcome: entry.outcome };
   const model = optionalString(entry.model);
   if (model !== undefined) parsed.model = model;
   const generatedAt = optionalString(entry.generated_at);
@@ -93,11 +93,9 @@ function parseSynthid(entry: Record<string, unknown>): DoneOpenAiResult["synthid
   return parsed;
 }
 
-// The body of a 2xx response. Both image entries are required: the API omits a
-// check that does not apply rather than reporting not_detected, so a missing
-// entry means "not checked" and must not be shown as a negative result
-// (PLAN §4 "TÄ rule").
-export function parseResponse(text: string, serverConverted: boolean): ParsedProvenance {
+// Both image entries are required: a missing entry means "not checked", which
+// must never be shown as not_detected.
+export function parseResponse(text: string): ParsedProvenance {
   let payload: unknown;
   try {
     payload = JSON.parse(text);
@@ -112,13 +110,11 @@ export function parseResponse(text: string, serverConverted: boolean): ParsedPro
   const c2pa = parseC2pa(c2paEntry);
   const synthid = parseSynthid(synthidEntry);
   if (c2pa === undefined || synthid === undefined) return { ok: false, error: { code: "bad_response" } };
-  return { ok: true, result: { state: "done", serverConverted, c2pa, synthid } };
+  return { ok: true, result: { c2pa, synthid } };
 }
 
-// Retry-After is delta-seconds or an HTTP-date (RFC 9110); the two forms are
-// disjoint, so a malformed number is rejected rather than falling through to
-// Date.parse, which happily reads "1.5" as a date in 2001. A date only becomes
-// a countdown with a clock, so the clock is a parameter.
+// Delta-seconds or an HTTP-date (RFC 9110). A malformed number must not fall
+// through to Date.parse, which reads "1.5" as a date.
 const DELTA_FORM = /^[+-]?\d*\.?\d+$/;
 
 export function retryAfterSeconds(header: string | null, now: number = Date.now()): number | undefined {
@@ -133,8 +129,7 @@ export function retryAfterSeconds(header: string | null, now: number = Date.now(
   return Math.max(0, Math.ceil((at - now) / 1000));
 }
 
-// Only a non-2xx status reaches here, so anything else is a caller bug and
-// must not read as a result.
+// Callers pass only non-2xx statuses; anything else maps to bad_response.
 export function mapHttpError(status: number, retryAfter: string | null, now: number = Date.now()): OpenAiError {
   if (status === 429) {
     const seconds = retryAfterSeconds(retryAfter, now);
@@ -150,7 +145,7 @@ export function mapHttpError(status: number, retryAfter: string | null, now: num
 
 const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
 
-export async function readProvenanceResponse(response: Response, serverConverted: boolean): Promise<ParsedProvenance> {
+export async function readProvenanceResponse(response: Response): Promise<ParsedProvenance> {
   if (response.status < 200 || response.status >= 300) {
     return { ok: false, error: mapHttpError(response.status, response.headers.get("retry-after")) };
   }
@@ -158,11 +153,10 @@ export async function readProvenanceResponse(response: Response, serverConverted
   try {
     text = await response.text();
   } catch (error) {
-    // The deadline can expire after the headers arrive, while the body is still
-    // being read: that abort is ours, not the network's.
+    // The deadline can expire while the body is still being read.
     return { ok: false, error: { code: isAbortError(error) ? "timeout" : "network" } };
   }
-  return parseResponse(text, serverConverted);
+  return parseResponse(text);
 }
 
 export interface SendProvenanceDeps {
@@ -170,20 +164,12 @@ export interface SendProvenanceDeps {
   deadlineMs?: number;
 }
 
-// The caller may shorten the deadline (the conversion re-fetch, tests); the
-// shared fetch deadline applies otherwise.
 export function deadlineFor(deadlineMs?: number): number {
   return deadlineMs ?? FETCH_DEADLINE_MS;
 }
 
-// One deadline for the whole request, headers and body: a slower upload loses
-// the worker (PLAN §4 step 8.5, the measured 30 s limit). A thrown fetch is a
-// network failure — never a parsed result.
-export async function sendProvenanceUpload(
-  request: ProvenanceRequest,
-  serverConverted: boolean,
-  deps: SendProvenanceDeps = {},
-): Promise<ParsedProvenance> {
+// One deadline covers headers and body (PLAN §4 step 8.5).
+export async function sendProvenanceUpload(request: ProvenanceRequest, deps: SendProvenanceDeps = {}): Promise<ParsedProvenance> {
   const doFetch = deps.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), deadlineFor(deps.deadlineMs));
@@ -194,7 +180,7 @@ export async function sendProvenanceUpload(
       body: request.body,
       signal: controller.signal,
     });
-    return await readProvenanceResponse(response, serverConverted);
+    return await readProvenanceResponse(response);
   } catch (error) {
     return { ok: false, error: { code: isAbortError(error) ? "timeout" : "network" } };
   } finally {

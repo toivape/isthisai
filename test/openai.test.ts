@@ -10,12 +10,19 @@ import {
   readProvenanceResponse,
   retryAfterSeconds,
   sendProvenanceUpload,
+  type ProvenanceRequest,
 } from "../src/background/openai";
 
 // Deliberately not key-shaped: no real or plausible key value appears in tests.
 const KEY = "placeholder-not-a-key";
 
 const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+
+function built(bytes: Uint8Array, mediaType: string): ProvenanceRequest {
+  const result = buildRequest(KEY, bytes, mediaType);
+  if (!result.ok) throw new Error("expected a request");
+  return result.request;
+}
 
 function fixtureBody(name: string): string {
   return readFileSync(`test/fixtures/${name}`, "utf8");
@@ -40,7 +47,7 @@ describe("buildRequest", () => {
   });
 
   test("builds the multipart body with the File part typed by the sniffed media type", async () => {
-    const upload = buildRequest(KEY, JPEG_BYTES, "image/jpeg");
+    const upload = built(JPEG_BYTES, "image/jpeg");
     const part = upload.body.get("file");
     expect(part).toBeInstanceOf(Blob);
     expect((part as Blob).type).toBe("image/jpeg");
@@ -49,20 +56,20 @@ describe("buildRequest", () => {
   });
 
   test("sets no Content-Type header, so FormData supplies the multipart boundary", () => {
-    const upload = buildRequest(KEY, JPEG_BYTES, "image/png");
+    const upload = built(JPEG_BYTES, "image/png");
     const names = Object.keys(upload.headers).map((name) => name.toLowerCase());
     expect(names).not.toContain("content-type");
   });
 
   test("sends the key in the Authorization header and never in the URL", () => {
-    const upload = buildRequest(KEY, JPEG_BYTES, "image/jpeg");
+    const upload = built(JPEG_BYTES, "image/jpeg");
     expect(upload.headers.Authorization).toBe(`Bearer ${KEY}`);
     expect(upload.url).toBe(PROVENANCE_URL);
     expect(upload.url).not.toContain(KEY);
   });
 
   test("sends one file per request", () => {
-    const upload = buildRequest(KEY, JPEG_BYTES, "image/jpeg");
+    const upload = built(JPEG_BYTES, "image/jpeg");
     expect([...upload.body.keys()]).toEqual(["file"]);
   });
 
@@ -74,26 +81,55 @@ describe("buildRequest", () => {
       ["image/gif", "image.gif"],
     ];
     for (const [mediaType, filename] of names) {
-      const part = buildRequest(KEY, JPEG_BYTES, mediaType).body.get("file") as File;
+      const part = built(JPEG_BYTES, mediaType).body.get("file") as File;
       expect(part.name, mediaType).toBe(filename);
-      // The part type is what the API reads; the name must not contradict it.
       expect(part.type, mediaType).toBe(mediaType);
     }
   });
 
   test("an unknown media type gets a bare filename rather than an invented extension", () => {
-    const part = buildRequest(KEY, JPEG_BYTES, "image/avif").body.get("file") as File;
+    const part = built(JPEG_BYTES, "image/avif").body.get("file") as File;
     expect(part.name).toBe("image");
+  });
+});
+
+describe("buildRequest: the key", () => {
+  test("whitespace around a pasted key is trimmed", () => {
+    const result = buildRequest(`  ${KEY}\n`, JPEG_BYTES, "image/jpeg");
+    expect(result.ok && result.request.headers.Authorization).toBe(`Bearer ${KEY}`);
+  });
+
+  test("a key that cannot be sent as a header value is invalid_key, not a network error", () => {
+    // fetch throws a TypeError for these before sending anything.
+    for (const key of ["key-\u201cquoted\u201d", "two\nlines", "in side", "tab\tbed", "\u00e4\u00e4kk\u00f6set"]) {
+      expect(buildRequest(key, JPEG_BYTES, "image/jpeg"), JSON.stringify(key)).toStrictEqual({
+        ok: false,
+        error: { code: "invalid_key" },
+      });
+    }
+  });
+
+  test("an empty or blank key is invalid_key", () => {
+    for (const key of ["", "   "]) {
+      expect(buildRequest(key, JPEG_BYTES, "image/jpeg"), JSON.stringify(key)).toStrictEqual({
+        ok: false,
+        error: { code: "invalid_key" },
+      });
+    }
+  });
+
+  test("every visible ASCII character is accepted", () => {
+    let visible = "";
+    for (let code = 0x21; code <= 0x7e; code++) visible += String.fromCharCode(code);
+    expect(buildRequest(visible, JPEG_BYTES, "image/jpeg").ok).toBe(true);
   });
 });
 
 describe("parseResponse: the real responses", () => {
   test("parses the halloween fixture: c2pa detected trusted with OpenAI issuer, synthid detected", () => {
-    expect(parseResponse(fixtureBody("openai-halloween.json"), false)).toStrictEqual({
+    expect(parseResponse(fixtureBody("openai-halloween.json"))).toStrictEqual({
       ok: true,
       result: {
-        state: "done",
-        serverConverted: false,
         c2pa: {
           outcome: "detected",
           validation: "trusted",
@@ -107,11 +143,9 @@ describe("parseResponse: the real responses", () => {
   });
 
   test("parses the iceland fixture: both not_detected, c2pa not_present", () => {
-    expect(parseResponse(fixtureBody("openai-iceland.json"), false)).toStrictEqual({
+    expect(parseResponse(fixtureBody("openai-iceland.json"))).toStrictEqual({
       ok: true,
       result: {
-        state: "done",
-        serverConverted: false,
         c2pa: { outcome: "not_detected", validation: "not_present" },
         synthid: { outcome: "not_detected" },
       },
@@ -119,32 +153,23 @@ describe("parseResponse: the real responses", () => {
   });
 
   test("parses the re-saved fixture: c2pa not_detected and synthid detected", () => {
-    expect(parseResponse(fixtureBody("openai-halloween-resaved.json"), false)).toStrictEqual({
+    expect(parseResponse(fixtureBody("openai-halloween-resaved.json"))).toStrictEqual({
       ok: true,
       result: {
-        state: "done",
-        serverConverted: false,
         c2pa: { outcome: "not_detected", validation: "not_present" },
         synthid: { outcome: "detected" },
       },
     });
   });
 
-  test("carries serverConverted into the parsed result", () => {
-    const parsed = parseResponse(body([c2pa(), synthid()]), true);
-    expect(parsed.ok && parsed.result.serverConverted).toBe(true);
-  });
 });
 
 describe("parseResponse: nulls, order and unknown entries", () => {
   test("maps a null issuer, model and generated_at to absent, not the string null", () => {
-    // toStrictEqual, not toEqual: a key assigned undefined slips past a loose
-    // comparison and is still a phantom field in the stored result.
-    expect(parseResponse(body([c2pa(), synthid()]), false)).toStrictEqual({
+    // toStrictEqual: a key assigned undefined would pass toEqual.
+    expect(parseResponse(body([c2pa(), synthid()]))).toStrictEqual({
       ok: true,
       result: {
-        state: "done",
-        serverConverted: false,
         c2pa: { outcome: "detected", validation: "trusted" },
         synthid: { outcome: "not_detected" },
       },
@@ -152,11 +177,8 @@ describe("parseResponse: nulls, order and unknown entries", () => {
   });
 
   test("a synthid entry that reports a model and time keeps them", () => {
-    // "model and generated_at provide the generating model and generation time
-    // when available" — the real responses have nulls, so this shape is the one
-    // an untested branch would drop.
     const entry = synthid({ outcome: "detected", model: "SynthID", generated_at: "2026-05-20T00:00:00Z" });
-    const parsed = parseResponse(body([c2pa(), entry]), false);
+    const parsed = parseResponse(body([c2pa(), entry]));
     expect(parsed.ok && parsed.result.synthid).toStrictEqual({
       outcome: "detected",
       model: "SynthID",
@@ -165,25 +187,25 @@ describe("parseResponse: nulls, order and unknown entries", () => {
   });
 
   test("finds the entries by type, not by array position", () => {
-    const forward = parseResponse(body([c2pa(), synthid()]), false);
-    const reversed = parseResponse(body([synthid(), c2pa()]), false);
+    const forward = parseResponse(body([c2pa(), synthid()]));
+    const reversed = parseResponse(body([synthid(), c2pa()]));
     expect(reversed).toStrictEqual(forward);
   });
 
   test("ignores an unknown result type", () => {
-    const parsed = parseResponse(body([c2pa(), synthid(), { type: "future_signal", outcome: "detected" }]), false);
+    const parsed = parseResponse(body([c2pa(), synthid(), { type: "future_signal", outcome: "detected" }]));
     expect(parsed.ok).toBe(true);
   });
 
   test("an unknown outcome is bad_response", () => {
-    expect(parseResponse(body([c2pa({ outcome: "partial" }), synthid()]), false)).toEqual({
+    expect(parseResponse(body([c2pa({ outcome: "partial" }), synthid()]))).toEqual({
       ok: false,
       error: { code: "bad_response" },
     });
   });
 
   test("an unknown validation_state is bad_response", () => {
-    expect(parseResponse(body([c2pa({ validation_state: "unclear" }), synthid()]), false)).toEqual({
+    expect(parseResponse(body([c2pa({ validation_state: "unclear" }), synthid()]))).toEqual({
       ok: false,
       error: { code: "bad_response" },
     });
@@ -191,11 +213,10 @@ describe("parseResponse: nulls, order and unknown entries", () => {
 });
 
 describe("parseResponse: validation_state", () => {
-  // The verdict rule keys on trusted and valid (trusted/valid can be an AI
-  // signal; invalid cannot), so every documented value must survive parsing.
+  // The verdict rule keys on these values, so each must survive parsing.
   test("parses each documented validation_state", () => {
     for (const state of ["trusted", "valid", "invalid", "not_present"] as const) {
-      const parsed = parseResponse(body([c2pa({ validation_state: state }), synthid()]), false);
+      const parsed = parseResponse(body([c2pa({ validation_state: state }), synthid()]));
       expect(parsed.ok && parsed.result.c2pa.validation, state).toBe(state);
     }
   });
@@ -203,11 +224,9 @@ describe("parseResponse: validation_state", () => {
   test("an absent validation_state leaves validation absent", () => {
     const entry = c2pa();
     delete entry.validation_state;
-    expect(parseResponse(body([entry, synthid()]), false)).toStrictEqual({
+    expect(parseResponse(body([entry, synthid()]))).toStrictEqual({
       ok: true,
       result: {
-        state: "done",
-        serverConverted: false,
         c2pa: { outcome: "detected" },
         synthid: { outcome: "not_detected" },
       },
@@ -215,12 +234,10 @@ describe("parseResponse: validation_state", () => {
   });
 
   test("a null validation_state leaves validation absent", () => {
-    const parsed = parseResponse(body([c2pa({ validation_state: null }), synthid()]), false);
+    const parsed = parseResponse(body([c2pa({ validation_state: null }), synthid()]));
     expect(parsed).toStrictEqual({
       ok: true,
       result: {
-        state: "done",
-        serverConverted: false,
         c2pa: { outcome: "detected" },
         synthid: { outcome: "not_detected" },
       },
@@ -228,10 +245,9 @@ describe("parseResponse: validation_state", () => {
   });
 
   test("the issuer of a third-party manifest is still read when not detected", () => {
-    // The docs: a non-OpenAI manifest gives not_detected but issuer and
-    // validation_state still describe it.
+    // A non-OpenAI manifest is not_detected, but issuer and validation_state still describe it.
     const entry = c2pa({ outcome: "not_detected", validation_state: "valid", issuer: "Adobe Inc." });
-    const parsed = parseResponse(body([entry, synthid()]), false);
+    const parsed = parseResponse(body([entry, synthid()]));
     expect(parsed.ok && parsed.result.c2pa).toStrictEqual({
       outcome: "not_detected",
       validation: "valid",
@@ -242,27 +258,27 @@ describe("parseResponse: validation_state", () => {
 
 describe("parseResponse: contract violations", () => {
   test("an image response without a synthid entry is bad_response", () => {
-    expect(parseResponse(body([c2pa()]), false)).toEqual({ ok: false, error: { code: "bad_response" } });
+    expect(parseResponse(body([c2pa()]))).toEqual({ ok: false, error: { code: "bad_response" } });
   });
 
   test("an image response without a c2pa entry is bad_response", () => {
-    expect(parseResponse(body([synthid()]), false)).toEqual({ ok: false, error: { code: "bad_response" } });
+    expect(parseResponse(body([synthid()]))).toEqual({ ok: false, error: { code: "bad_response" } });
   });
 
   test("a body with no results array is bad_response", () => {
-    expect(parseResponse(JSON.stringify({ object: "content_provenance_check" }), false)).toEqual({
+    expect(parseResponse(JSON.stringify({ object: "content_provenance_check" }))).toEqual({
       ok: false,
       error: { code: "bad_response" },
     });
   });
 
   test("a non-JSON body is bad_response", () => {
-    expect(parseResponse("<html>gateway</html>", false)).toEqual({ ok: false, error: { code: "bad_response" } });
+    expect(parseResponse("<html>gateway</html>")).toEqual({ ok: false, error: { code: "bad_response" } });
   });
 
   test("a JSON body that is not an object is bad_response", () => {
     for (const json of ["null", "[]", "\"a string\"", "7"]) {
-      expect(parseResponse(json, false), json).toEqual({ ok: false, error: { code: "bad_response" } });
+      expect(parseResponse(json), json).toEqual({ ok: false, error: { code: "bad_response" } });
     }
   });
 });
@@ -276,8 +292,6 @@ describe("retryAfterSeconds", () => {
   });
 
   test("an HTTP-date becomes the remaining seconds against the caller's clock", () => {
-    // RFC 9110 allows either form; a date needs a clock to become a countdown,
-    // so the clock is a parameter rather than a hidden Date.now().
     const now = Date.parse("2026-10-21T07:27:00Z");
     expect(retryAfterSeconds("Wed, 21 Oct 2026 07:28:00 GMT", now)).toBe(60);
   });
@@ -350,11 +364,10 @@ describe("mapHttpError", () => {
 });
 
 describe("sendProvenanceUpload", () => {
-  const request = (): ReturnType<typeof buildRequest> => buildRequest(KEY, JPEG_BYTES, "image/jpeg");
+  const request = (): ProvenanceRequest => built(JPEG_BYTES, "image/jpeg");
 
   const failingFetch = (() => Promise.reject(new TypeError("Failed to fetch"))) as unknown as typeof fetch;
 
-  // Respects the abort signal the client sets, so the deadline path is real.
   const hangingFetch = ((_url: string, init: RequestInit) =>
     new Promise((_resolve, reject) => {
       init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
@@ -364,7 +377,7 @@ describe("sendProvenanceUpload", () => {
     Promise.resolve(new Response(fixtureBody("openai-iceland.json"), { status: 200 }))) as unknown as typeof fetch;
 
   test("a successful response is parsed", async () => {
-    const parsed = await sendProvenanceUpload(request(), false, { fetchImpl: okFetch });
+    const parsed = await sendProvenanceUpload(request(), { fetchImpl: okFetch });
     expect(parsed.ok).toBe(true);
   });
 
@@ -375,17 +388,16 @@ describe("sendProvenanceUpload", () => {
 
   test("a DOMException that is not an abort is still a network error", async () => {
     const odd = (() => Promise.reject(new DOMException("boom", "NetworkError"))) as unknown as typeof fetch;
-    expect(await sendProvenanceUpload(request(), false, { fetchImpl: odd })).toEqual({
+    expect(await sendProvenanceUpload(request(), { fetchImpl: odd })).toEqual({
       ok: false,
       error: { code: "network" },
     });
   });
 
   test("no timer is left pending once the response settles", async () => {
-    // An uncleared timeout keeps the MV3 worker alive after the upload is done.
     vi.useFakeTimers();
     try {
-      await sendProvenanceUpload(request(), false, { fetchImpl: okFetch });
+      await sendProvenanceUpload(request(), { fetchImpl: okFetch });
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
@@ -393,20 +405,20 @@ describe("sendProvenanceUpload", () => {
   });
 
   test("a thrown fetch is a network error, never a result", async () => {
-    expect(await sendProvenanceUpload(request(), false, { fetchImpl: failingFetch })).toEqual({
+    expect(await sendProvenanceUpload(request(), { fetchImpl: failingFetch })).toEqual({
       ok: false,
       error: { code: "network" },
     });
   });
 
   test("an expired deadline is a timeout", async () => {
-    const parsed = await sendProvenanceUpload(request(), false, { fetchImpl: hangingFetch, deadlineMs: 5 });
+    const parsed = await sendProvenanceUpload(request(), { fetchImpl: hangingFetch, deadlineMs: 5 });
     expect(parsed).toEqual({ ok: false, error: { code: "timeout" } });
   });
 
   test("a non-2xx response maps to its error code", async () => {
     const rateLimited = (() => Promise.resolve(new Response("slow down", { status: 429, headers: { "retry-after": "9" } }))) as unknown as typeof fetch;
-    expect(await sendProvenanceUpload(request(), false, { fetchImpl: rateLimited })).toEqual({
+    expect(await sendProvenanceUpload(request(), { fetchImpl: rateLimited })).toEqual({
       ok: false,
       error: { code: "rate_limited", retryAfterSec: 9 },
     });
@@ -418,7 +430,7 @@ describe("sendProvenanceUpload", () => {
       calls.push({ url, init });
       return Promise.resolve(new Response(fixtureBody("openai-iceland.json"), { status: 200 }));
     }) as unknown as typeof fetch;
-    await sendProvenanceUpload(request(), false, { fetchImpl: spyFetch });
+    await sendProvenanceUpload(request(), { fetchImpl: spyFetch });
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(PROVENANCE_URL);
     expect(calls[0].init.method).toBe("POST");
@@ -429,13 +441,13 @@ describe("sendProvenanceUpload", () => {
 describe("readProvenanceResponse", () => {
   test("a 200 parses the body", async () => {
     const response = new Response(fixtureBody("openai-iceland.json"), { status: 200 });
-    const parsed = await readProvenanceResponse(response, false);
+    const parsed = await readProvenanceResponse(response);
     expect(parsed.ok).toBe(true);
   });
 
   test("a 429 takes Retry-After from the header", async () => {
     const response = new Response("slow down", { status: 429, headers: { "retry-after": "12" } });
-    expect(await readProvenanceResponse(response, false)).toEqual({
+    expect(await readProvenanceResponse(response)).toEqual({
       ok: false,
       error: { code: "rate_limited", retryAfterSec: 12 },
     });
@@ -443,17 +455,17 @@ describe("readProvenanceResponse", () => {
 
   test("a 401 does not read the body as a result", async () => {
     const response = new Response(fixtureBody("openai-halloween.json"), { status: 401 });
-    expect(await readProvenanceResponse(response, false)).toEqual({ ok: false, error: { code: "http_401" } });
+    expect(await readProvenanceResponse(response)).toEqual({ ok: false, error: { code: "http_401" } });
   });
 
   test("a 200 with a malformed body is bad_response", async () => {
     const response = new Response("not json", { status: 200 });
-    expect(await readProvenanceResponse(response, false)).toEqual({ ok: false, error: { code: "bad_response" } });
+    expect(await readProvenanceResponse(response)).toEqual({ ok: false, error: { code: "bad_response" } });
   });
 
   test("only 2xx counts as success, so a 3xx is not read as a body", async () => {
     const response = new Response(fixtureBody("openai-iceland.json"), { status: 300 });
-    expect(await readProvenanceResponse(response, false)).toEqual({ ok: false, error: { code: "bad_response" } });
+    expect(await readProvenanceResponse(response)).toEqual({ ok: false, error: { code: "bad_response" } });
   });
 
   test("a body that fails mid-read is a network error", async () => {
@@ -462,17 +474,15 @@ describe("readProvenanceResponse", () => {
       headers: new Headers(),
       text: () => Promise.reject(new Error("connection lost")),
     } as unknown as Response;
-    expect(await readProvenanceResponse(broken, false)).toEqual({ ok: false, error: { code: "network" } });
+    expect(await readProvenanceResponse(broken)).toEqual({ ok: false, error: { code: "network" } });
   });
 
   test("a body read aborted by our own deadline is a timeout, not a network error", async () => {
-    // The deadline can expire after the headers arrive, while the body is still
-    // being read; that abort is ours, so it must not read as a network fault.
     const aborted = {
       status: 200,
       headers: new Headers(),
       text: () => Promise.reject(new DOMException("Aborted", "AbortError")),
     } as unknown as Response;
-    expect(await readProvenanceResponse(aborted, false)).toEqual({ ok: false, error: { code: "timeout" } });
+    expect(await readProvenanceResponse(aborted)).toEqual({ ok: false, error: { code: "timeout" } });
   });
 });

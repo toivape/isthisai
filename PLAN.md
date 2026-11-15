@@ -33,7 +33,7 @@ Work through the milestones in order. Each has acceptance criteria; do not start
 - EU AI Act Article 50 has applied since 2 Aug 2026. Providers must mark AI output with signed metadata plus an imperceptible watermark, and must offer a detection mechanism. A watermark-detection interoperability solution is due 2 Feb 2027, so there is no universal detector yet.
 - **OpenAI Content Provenance API** (docs: https://developers.openai.com/api/docs/guides/content-provenance):
   - `POST https://api.openai.com/v1/content_provenance_checks`, header `Authorization: Bearer <key>`, multipart field `file`, one file per request.
-  - Images: PNG, JPEG, WebP and GIF (including animated GIFs). Max 50 MiB.
+  - Images: PNG, JPEG, WebP and GIF. Max 50 MiB. The docs do not say whether animated GIFs are supported.
   - Do **not** set the `Content-Type` header manually. Let `fetch` + `FormData` set the multipart boundary. Set the file part's real media type (`image/jpeg`, not `image/jpg`).
   - Response has `results[]` with a `c2pa` entry and a `synthid` entry (images). There is no top-level verdict. Each has `outcome: "detected" | "not_detected"`. Missing details are `null`.
   - C2PA entry also has `validation_state` (`trusted | valid | invalid | not_present`), `issuer`, `model`, `generated_at`.
@@ -257,7 +257,8 @@ type CheckError = { code: "permission_denied" | "fetch_failed" | "timeout" | "to
 
 type OpenAiError = {
   code: "no_key" | "cancelled" | "check_expired" | "hash_mismatch" | "unsupported_type" | "fetch_failed" | "timeout"
-      | "http_400" | "http_401" | "http_404" | "http_4xx" | "http_5xx" | "rate_limited" | "network" | "bad_response";
+      | "http_400" | "http_401" | "http_404" | "http_4xx" | "http_5xx" | "rate_limited" | "network" | "bad_response"
+      | "invalid_key"; // the stored key cannot be sent as a header value (fetch would throw before sending)
   retryAfterSec?: number;
 };
 ```
