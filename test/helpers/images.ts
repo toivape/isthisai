@@ -133,8 +133,7 @@ export function pngWithXmpProvenance(url: string): Uint8Array {
 }
 
 // Canonical 35-byte 1x1 GIF89a.
-export function minimalGif(): Uint8Array {
-  return Uint8Array.from([
+export function minimalGif(): Uint8Array {  return Uint8Array.from([
     0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
     0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00,
     0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
@@ -152,4 +151,21 @@ export function minimalWebp(): Uint8Array {
     new TextEncoder().encode("WEBP"),
     chunk,
   ]);
+}
+
+// Flips one byte inside a PNG's first IDAT payload, leaving the C2PA caBX chunk
+// untouched: the manifest still parses and still claims an AI action, but the
+// image no longer matches its hard binding (assertion.dataHash.mismatch). The
+// tampered copy is built here rather than committed, since it differs from a
+// real fixture by a single byte.
+export function tamperPngDataHash(bytes: Uint8Array): Uint8Array {
+  const copy = bytes.slice();
+  for (let at = 8; at <= copy.length - 8; at++) {
+    if (copy[at] === 0x49 && copy[at + 1] === 0x44 && copy[at + 2] === 0x41 && copy[at + 3] === 0x54) {
+      const flipAt = at + 4 + 64; // well inside the payload, past the zlib header
+      copy[flipAt] = copy[flipAt] ^ 0xff;
+      return copy;
+    }
+  }
+  throw new Error("no IDAT chunk found");
 }

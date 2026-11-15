@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { afterEach, beforeAll, describe, expect, test, vi, type MockInstance } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type MockInstance } from "vitest";
 import { readC2pa, mapC2paError, mapC2paStore } from "../src/background/c2pa";
 import type { LocalC2pa } from "../src/shared/types";
-import { minimalGif, minimalWebp, pngWithXmpProvenance } from "./helpers/images";
+import { minimalGif, minimalWebp, pngWithXmpProvenance, tamperPngDataHash } from "./helpers/images";
 
 const WASM_BYTES = readFileSync("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm");
 
@@ -70,9 +70,20 @@ function store(activeLabel: string, manifests: Record<string, Record<string, unk
     active_manifest: activeLabel,
     manifests,
     validation_status: [],
-    validation_results: { activeManifest: { success: [], informational: [], failure: [] } },
+    validation_results: intactResults,
     validation_state: "Valid",
   };
+}
+
+// The same store with a chosen validation_results and validation_state, so the
+// integrity axis can be exercised without repeating the whole store shape.
+function storeWith(
+  activeLabel: string,
+  manifests: Record<string, Record<string, unknown>>,
+  validationResults: unknown,
+  validationState: string,
+): Record<string, unknown> {
+  return { ...store(activeLabel, manifests), validation_results: validationResults, validation_state: validationState };
 }
 
 // v3 ingredient: active_manifest + validation_results, as the reader emits
@@ -117,6 +128,32 @@ const untrustedButValidResults = {
   },
 };
 
+// What a real validator emits for an intact manifest: the claim signature
+// validated, the signer was inside its validity window, and the image bytes
+// matched the hard binding.
+const intactResults = {
+  activeManifest: {
+    success: [
+      { code: "claimSignature.validated" },
+      { code: "claimSignature.insideValidity" },
+      { code: "assertion.dataHash.match" },
+    ],
+    informational: [],
+    failure: [{ code: "signingCredential.untrusted" }],
+  },
+};
+
+// The Microsoft shape: the binding is intact, but the signer certificate does
+// not meet the C2PA profile, which makes the manifest invalid without any
+// tampering.
+const rejectedSignerResults = {
+  activeManifest: {
+    success: intactResults.activeManifest.success,
+    informational: [],
+    failure: [{ code: "signingCredential.untrusted" }, { code: "signingCredential.invalid" }],
+  },
+};
+
 // ---- pure mapping ----
 
 describe("mapC2paStore", () => {
@@ -131,6 +168,7 @@ describe("mapC2paStore", () => {
     expect(mapC2paStore(s)).toEqual({
       manifest: "present",
       aiAction: true,
+      integrity: "verified",
       claimedIssuer: "OpenAI OpCo, LLC",
       claimedModel: "ChatGPT / gpt-image",
       generatedAt: "2026-01-01T00:00:00Z",
@@ -165,6 +203,7 @@ describe("mapC2paStore", () => {
     expect(mapC2paStore(s)).toEqual({
       manifest: "present",
       aiAction: false,
+      integrity: "verified",
       claimedIssuer: "Canon Inc.",
       generatedAt: "2026-01-01T00:00:00Z",
     } satisfies LocalC2pa);
@@ -496,6 +535,96 @@ describe("mapC2paStore", () => {
   });
 });
 
+// ValidationState::Invalid conflates a broken binding with a signer certificate
+// that the C2PA profile rejects, so integrity is derived separately from the
+// status codes the validator reports (C2PA standard status codes).
+describe("mapC2paStore: the integrity axis", () => {
+  let active: Record<string, unknown>;
+
+  beforeEach(() => {
+    active = manifest({ label: "m", actions: [{ action: "c2pa.created", digitalSourceType: TRAINED }] });
+  });
+
+  test("verified when the signature validated, was inside validity, and the data hash matched", () => {
+    expect(mapC2paStore(store("m", { m: active })).integrity).toBe("verified");
+  });
+
+  test("verified for each hard-binding assertion form", () => {
+    // A BMFF container (AVIF/HEIC) binds through bmffHash, not dataHash.
+    for (const code of [
+      "assertion.dataHash.match",
+      "assertion.bmffHash.match",
+      "assertion.boxesHash.match",
+      "assertion.collectionHash.match",
+    ]) {
+      const results = {
+        activeManifest: {
+          success: [
+            { code: "claimSignature.validated" },
+            { code: "claimSignature.insideValidity" },
+            { code },
+          ],
+          informational: [],
+          failure: [],
+        },
+      };
+      expect(mapC2paStore(storeWith("m", { m: active }, results, "Valid")).integrity, code).toBe("verified");
+    }
+  });
+
+  test("unverified when the claim signature did not validate", () => {
+    const results = {
+      activeManifest: {
+        success: [{ code: "claimSignature.insideValidity" }, { code: "assertion.dataHash.match" }],
+        informational: [],
+        failure: [{ code: "claimSignature.mismatch" }],
+      },
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("unverified");
+  });
+
+  test("unverified when the signing certificate was outside its validity window", () => {
+    const results = {
+      activeManifest: {
+        success: [{ code: "claimSignature.validated" }, { code: "assertion.dataHash.match" }],
+        informational: [],
+        failure: [{ code: "signingCredential.expired" }],
+      },
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("unverified");
+  });
+
+  test("unverified when no hard binding matched", () => {
+    // Tampering withholds the match code; it does not add a success one.
+    const results = {
+      activeManifest: {
+        success: [{ code: "claimSignature.validated" }, { code: "claimSignature.insideValidity" }],
+        informational: [],
+        failure: [{ code: "signingCredential.untrusted" }, { code: "assertion.dataHash.mismatch" }],
+      },
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("unverified");
+  });
+
+  test("unverified when there are no validation results at all", () => {
+    expect(mapC2paStore(storeWith("m", { m: active }, undefined, "Invalid")).integrity).toBe("unverified");
+  });
+
+  test("a rejected signer certificate leaves the binding verified while the manifest is invalid", () => {
+    const result = mapC2paStore(storeWith("m", { m: active }, rejectedSignerResults, "Invalid"));
+    expect(result.manifest).toBe("invalid");
+    expect(result.aiAction).toBe(true);
+    expect(result.integrity).toBe("verified");
+  });
+
+  test("a manifest that was never found reports no integrity at all", () => {
+    // There is no binding to assess, so the field is absent rather than a
+    // misleading "unverified".
+    expect(mapC2paStore({ active_manifest: "m", manifests: {}, validation_state: "Valid" })).not.toHaveProperty("integrity");
+    expect(mapC2paError("C2pa(JumbfNotFound)")).not.toHaveProperty("integrity");
+  });
+});
+
 describe("mapC2paError", () => {
   test("JumbfNotFound → absent", () => {
     expect(mapC2paError("C2pa(JumbfNotFound)")).toEqual<LocalC2pa>({ manifest: "absent", aiAction: false });
@@ -548,11 +677,43 @@ describe("readC2pa", () => {
     expect(result).toEqual({
       manifest: "present",
       aiAction: true,
+      integrity: "verified",
       claimedIssuer: "OpenAI OpCo, LLC",
       claimedModel: "ChatGPT / gpt-image",
       generatedAt: "2026-10-31T12:38:51.498118131Z",
     } satisfies LocalC2pa);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("gemini fixture: present with a verified binding, issued by Google", async () => {
+    const result = await readC2pa("image/jpeg", fixture("ai-gemini-bunny.jpg"), WASM_BYTES);
+    expect(result).toEqual({
+      manifest: "present",
+      aiAction: true,
+      integrity: "verified",
+      claimedIssuer: "Google LLC",
+    } satisfies LocalC2pa);
+  });
+
+  test("microsoft fixture: invalid, but the binding is verified and the issuer is named", async () => {
+    // The signer certificate does not meet the C2PA profile (an EKU outside it),
+    // which makes c2pa-wasm's state Invalid even though the signature and the
+    // data hash both verify. Nothing was edited.
+    const result = await readC2pa("image/jpeg", fixture("ai-microsoft-bunny.jpg"), WASM_BYTES);
+    expect(result.manifest).toBe("invalid");
+    expect(result.aiAction).toBe(true);
+    expect(result.integrity).toBe("verified");
+    expect(result.claimedIssuer).toBe("Microsoft Corporation");
+    expect(result.claimedModel).toBe("Bing Image Creator");
+  });
+
+  test("a tampered halloween: AI action intact, binding broken", async () => {
+    // Flipping one byte of the image data leaves the manifest and its actions
+    // readable, but the hard binding no longer matches.
+    const result = await readC2pa("image/png", tamperPngDataHash(fixture("ai-test-halloween.png")), WASM_BYTES);
+    expect(result.manifest).toBe("invalid");
+    expect(result.aiAction).toBe(true);
+    expect(result.integrity).toBe("unverified");
   });
 
   test("iceland fixture: absent", async () => {

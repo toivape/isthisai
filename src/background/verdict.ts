@@ -12,8 +12,17 @@ function openAiSynthidIsSignal(openai: OpenAiResultPart): boolean {
   return openai.state === "done" && openai.synthid.outcome === "detected";
 }
 
+// "present" means the validator accepted the manifest, which already covers the
+// binding. An "invalid" manifest only counts when the binding itself is intact,
+// so a signer certificate the C2PA profile rejects is still a signal while a
+// tampered image is not.
+function localC2paIsSignal(c2pa: CheckResult["localC2pa"]): boolean {
+  if (!c2pa.aiAction) return false;
+  return c2pa.manifest === "present" || c2pa.integrity === "verified";
+}
+
 export function computeVerdict(result: CheckResult): CheckResult["verdict"] {
-  if (result.localC2pa.manifest === "present" && result.localC2pa.aiAction) return "ai_signal";
+  if (localC2paIsSignal(result.localC2pa)) return "ai_signal";
   if (result.localXmp.state === "detected") return "ai_signal";
   if (openAiC2paIsSignal(result.openai)) return "ai_signal";
   if (openAiSynthidIsSignal(result.openai)) return "ai_signal";

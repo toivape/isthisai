@@ -125,6 +125,9 @@ const guardCases: GuardCase[] = [
         validResult({ localC2pa: { manifest, aiAction: false } }),
       ),
       ...["detected", "not_detected", "error"].map((state) => validResult({ localXmp: { state } })),
+      ...["verified", "unverified"].map((integrity) =>
+        validResult({ localC2pa: { manifest: "invalid", aiAction: true, integrity } }),
+      ),
       validResult({
         localC2pa: { manifest: "present", aiAction: true, claimedIssuer: "x", claimedModel: "y", generatedAt: "z" },
       }),
@@ -153,6 +156,7 @@ const guardCases: GuardCase[] = [
       validResult({ localC2pa: { manifest: "absent", aiAction: false, claimedIssuer: 5 } }),
       validResult({ localC2pa: { manifest: "absent", aiAction: false, claimedModel: 5 } }),
       validResult({ localC2pa: { manifest: "absent", aiAction: false, generatedAt: 5 } }),
+      validResult({ localC2pa: { manifest: "present", aiAction: true, integrity: "probably" } }),
       validResult({ localXmp: 5 }),
       validResult({ localXmp: { state: "bogus" } }),
       validResult({ localXmp: { state: "not_detected", digitalSourceType: 5 } }),

@@ -117,6 +117,28 @@ function creatingActionOf(manifest: Record<string, unknown>): ActionLike | undef
   return actionsOf(manifest).find((action) => action.action === "c2pa.created");
 }
 
+// The C2PA standard status codes c2pa-rs requires before it will call a manifest
+// Valid: the claim signature validated and was inside its validity window, and a
+// hard-binding assertion matched. A tampered image *withholds* the match code
+// rather than reporting a new one, so requiring it is what keeps a broken binding
+// out of the verdict. BMFF containers (AVIF/HEIC) bind through bmffHash, not
+// dataHash, hence the list.
+const SIGNATURE_CODES = ["claimSignature.validated", "claimSignature.insideValidity"];
+const BINDING_MATCH_CODES = [
+  "assertion.dataHash.match",
+  "assertion.bmffHash.match",
+  "assertion.boxesHash.match",
+  "assertion.collectionHash.match",
+];
+
+function integrityOf(validationResults: unknown): "verified" | "unverified" {
+  const active = isObject(validationResults) ? validationResults.activeManifest : undefined;
+  const success = isObject(active) && Array.isArray(active.success) ? active.success : [];
+  const codes = new Set(success.map((entry) => (isObject(entry) ? entry.code : undefined)));
+  const signatureValidated = SIGNATURE_CODES.every((code) => codes.has(code));
+  return signatureValidated && BINDING_MATCH_CODES.some((code) => codes.has(code)) ? "verified" : "unverified";
+}
+
 export function mapC2paStore(store: unknown): LocalC2pa {
   if (!isObject(store)) return { manifest: "error", aiAction: false };
   const activeLabel = store.active_manifest;
@@ -136,6 +158,9 @@ export function mapC2paStore(store: unknown): LocalC2pa {
   const result: LocalC2pa = {
     manifest,
     aiAction: hasAiAction(manifests, activeLabel, new Set()),
+    // Both states above are the only ones that reach here, which is what keeps
+    // the field off a manifest that was never found.
+    integrity: integrityOf(store.validation_results),
   };
   if (typeof signatureInfo.issuer === "string") result.claimedIssuer = signatureInfo.issuer;
   if (creating) {
@@ -146,8 +171,7 @@ export function mapC2paStore(store: unknown): LocalC2pa {
   return result;
 }
 
-export function mapC2paError(thrown: unknown): LocalC2pa {
-  const message = thrown instanceof Error ? thrown.message : String(thrown);
+export function mapC2paError(thrown: unknown): LocalC2pa {  const message = thrown instanceof Error ? thrown.message : String(thrown);
   if (message.startsWith("C2pa(JumbfNotFound)")) return { manifest: "absent", aiAction: false };
   if (message.startsWith("C2pa(RemoteManifestUrl(")) return { manifest: "remote_unfetched", aiAction: false };
   return { manifest: "error", aiAction: false };

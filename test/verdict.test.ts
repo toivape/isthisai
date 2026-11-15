@@ -46,7 +46,25 @@ describe("computeVerdict", () => {
     expect(computeVerdict(result({ localC2pa: { manifest: "present", aiAction: false } }))).toBe("no_signal");
   });
 
-  test("C2PA invalid with AI action gives no_signal", () => {
+  test("an invalid manifest with an intact binding and an AI action gives ai_signal", () => {
+    // A signer certificate the C2PA profile rejects, with the signature and data
+    // hash both verified: the image really does carry an AI claim.
+    expect(
+      computeVerdict(result({ localC2pa: { manifest: "invalid", aiAction: true, integrity: "verified" } })),
+    ).toBe("ai_signal");
+  });
+
+  test("a tampered manifest with an AI action gives no_signal", () => {
+    // The AI action is still readable but the bytes no longer match the binding,
+    // so the claim is not evidence about this image.
+    expect(
+      computeVerdict(result({ localC2pa: { manifest: "invalid", aiAction: true, integrity: "unverified" } })),
+    ).toBe("no_signal");
+  });
+
+  test("an invalid manifest with an AI action but no integrity recorded gives no_signal", () => {
+    // The field is absent when there was nothing to assess; it must not be read
+    // as verified.
     expect(computeVerdict(result({ localC2pa: { manifest: "invalid", aiAction: true } }))).toBe("no_signal");
   });
 
@@ -70,6 +88,14 @@ describe("computeVerdict", () => {
     expect(computeVerdict(result({ openai: openAiDone({ outcome: "detected", validation: "trusted" }) }))).toBe("ai_signal");
     expect(computeVerdict(result({ openai: openAiDone({ outcome: "detected", validation: "valid" }) }))).toBe("ai_signal");
     expect(computeVerdict(result({ openai: openAiDone({ outcome: "detected", validation: "invalid" }) }))).toBe("no_signal");
+  });
+
+  test("OpenAI not_detected with a trusted or valid third-party manifest is not a signal", () => {
+    // Observed on real files: a Google-signed image returns outcome not_detected
+    // with validation trusted, and a Microsoft-signed one with valid. The API
+    // still describes the manifest; only the outcome gates the signal.
+    expect(computeVerdict(result({ openai: openAiDone({ outcome: "not_detected", validation: "trusted" }) }))).toBe("no_signal");
+    expect(computeVerdict(result({ openai: openAiDone({ outcome: "not_detected", validation: "valid" }) }))).toBe("no_signal");
   });
 
   test("OpenAI SynthID detected gives ai_signal", () => {
