@@ -56,11 +56,15 @@ export interface UploadRegistry {
 export function uploadRegistry(): UploadRegistry {
   const inFlight = new Map<string, Promise<OpenAiFlowOutcome>>();
   const completed = new Map<string, CheckResult>();
-  return {
+  const registry: UploadRegistry = {
     get: (imageHash) => completed.get(imageHash),
     run: (imageHash, start) => {
       const existing = inFlight.get(imageHash);
-      if (existing !== undefined) return existing;
+      // Only a success is shared. An error belongs to the first caller's source
+      // (a blob: that is gone, say), so a follower tries its own.
+      if (existing !== undefined) {
+        return existing.then((shared) => (shared.kind === "done" ? shared : registry.run(imageHash, start)));
+      }
       // Only a success is remembered: an OpenAI error must be retryable.
       const outcome = start()
         .then((result) => {
@@ -74,6 +78,7 @@ export function uploadRegistry(): UploadRegistry {
       return outcome;
     },
   };
+  return registry;
 }
 
 export interface OpenAiFlowDeps extends SendProvenanceDeps {
@@ -103,7 +108,12 @@ export function consentWindowPath(record: CheckRecord): string {
     sizeBytes: String(record.size),
   });
   const origin = httpOrigin(record.srcUrl);
-  if (origin !== undefined) params.set("origin", origin);
+  if (origin !== undefined) {
+    params.set("origin", origin);
+    // The converted re-fetch is a second download the hash check cannot cover,
+    // so the user is told the uploaded copy may differ from the stored one.
+    if (!isOpenAiType(record.mediaType)) params.set("converted", "1");
+  }
   return `${CONFIRM_WINDOW_PATH}?${params.toString()}`;
 }
 

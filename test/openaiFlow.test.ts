@@ -184,8 +184,18 @@ describe("consentWindowPath", () => {
   test("carries the image's origin, media type and size", () => {
     const path = consentWindowPath(record({ srcUrl: "https://cdn.example/i.avif", mediaType: "image/avif", size: 459248 }));
     expect(path).toBe(
-      "src/confirm/confirm.html?view=confirm&checkId=c1&mediaType=image%2Favif&sizeBytes=459248&origin=https%3A%2F%2Fcdn.example",
+      "src/confirm/confirm.html?view=confirm&checkId=c1&mediaType=image%2Favif&sizeBytes=459248&origin=https%3A%2F%2Fcdn.example&converted=1",
     );
+  });
+
+  test("only a format OpenAI refuses is flagged as converted", () => {
+    const flagged = (mediaType: string, srcUrl: string): boolean =>
+      new URLSearchParams(consentWindowPath(record({ srcUrl, mediaType })).split("?")[1]).get("converted") === "1";
+    expect(flagged("image/avif", "https://cdn.example/i.avif")).toBe(true);
+    expect(flagged("image/heic", "https://cdn.example/i.heic")).toBe(true);
+    expect(flagged("image/png", "https://cdn.example/i.png")).toBe(false);
+    // Nothing to convert from: the flow ends in unsupported_type, no second download.
+    expect(flagged("image/avif", "data:image/avif;base64,")).toBe(false);
   });
 
   test("a data: image has no origin, so the line is omitted", () => {
@@ -573,6 +583,8 @@ describe("runOpenAiFlow: merge, cache and report", () => {
 });
 
 describe("uploadRegistry", () => {
+  const done: OpenAiFlowOutcome = { kind: "done", result: storedResult({ imageHash: "hash" }) };
+
   test("runs one upload per hash and hands its outcome to a later caller", async () => {
     const registry = uploadRegistry();
     let started = 0;
@@ -583,7 +595,7 @@ describe("uploadRegistry", () => {
     const run = async (): Promise<OpenAiFlowOutcome> => {
       started += 1;
       await gate;
-      return { kind: "ignored" };
+      return done;
     };
 
     const first = registry.run("hash", run);
@@ -594,8 +606,29 @@ describe("uploadRegistry", () => {
     expect(started).toBe(1);
 
     // Once it has settled, a new caller starts a fresh run.
-    await expect(registry.run("hash", run)).resolves.toEqual({ kind: "ignored" });
+    await expect(registry.run("hash", run)).resolves.toEqual(done);
     expect(started).toBe(2);
+  });
+
+  test("a follower of a failed upload runs its own instead of inheriting the error", async () => {
+    const registry = uploadRegistry();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = registry.run("hash", async () => {
+      await gate;
+      return { kind: "error", error: { code: "fetch_failed" } };
+    });
+    let followerRuns = 0;
+    const second = registry.run("hash", async () => {
+      followerRuns += 1;
+      return done;
+    });
+    release();
+    expect(await first).toEqual({ kind: "error", error: { code: "fetch_failed" } });
+    expect(await second).toEqual(done);
+    expect(followerRuns).toBe(1);
   });
 
   test("different hashes do not wait for each other", async () => {

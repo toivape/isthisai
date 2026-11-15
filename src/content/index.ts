@@ -5,7 +5,7 @@
 // manifest content_scripts entry (hard rule 1).
 
 import { badgeAction, isBadgeVisible } from "./badge";
-import { findImages } from "./findImages";
+import { findImages, rememberDataUrl } from "./findImages";
 import { installOnce } from "./installOnce";
 import { DISMISS_ID, isStaleUpdate, verdictPresentation } from "./presentation";
 import { readBlobInPage } from "./readBlob";
@@ -69,27 +69,9 @@ function createShell(): ContentShell {
   // The data: image each recent check was about. A data: image is the only case
   // the OpenAI flow cannot re-fetch on its own: the check record stores its URL
   // without the payload (PLAN §3), so the page supplies the real one rather than
-  // guessing between two data: images of the same type. Bounded, because a data:
-  // URL is as large as the image it carries.
+  // guessing between two data: images of the same type.
   const checkedSrcUrls = new Map<string, string>();
-  const MAX_REMEMBERED_DATA_URLS = 16;
-
-  function rememberSrcUrl(checkId: string, srcUrl: string): void {
-    if (!srcUrl.startsWith("data:")) {
-      checkedSrcUrls.delete(checkId);
-      return;
-    }
-    // The worker's OpenAI done update repeats the payload-free URL; the full one
-    // must not be replaced by it, or a later read fetches an empty image.
-    const remembered = checkedSrcUrls.get(checkId);
-    if (remembered !== undefined && remembered.length >= srcUrl.length) return;
-    checkedSrcUrls.delete(checkId);
-    checkedSrcUrls.set(checkId, srcUrl);
-    if (checkedSrcUrls.size > MAX_REMEMBERED_DATA_URLS) {
-      const oldest = checkedSrcUrls.keys().next().value;
-      if (oldest !== undefined) checkedSrcUrls.delete(oldest);
-    }
-  }
+  const rememberSrcUrl = (checkId: string, srcUrl: string): void => rememberDataUrl(checkedSrcUrls, checkId, srcUrl);
 
   let activeCheckId: string | undefined;
 

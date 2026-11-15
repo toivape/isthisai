@@ -1,5 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { dataUrlToRead, findImages, findSourceByPrefix, matchedSrcPrefix, matchesSrcUrl } from "../src/content/findImages";
+import {
+  MAX_REMEMBERED_DATA_CHARS,
+  MAX_REMEMBERED_DATA_URLS,
+  dataUrlToRead,
+  findImages,
+  findSourceByPrefix,
+  matchedSrcPrefix,
+  matchesSrcUrl,
+  rememberDataUrl,
+} from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
 import { isBadgeVisible, shouldBadge } from "../src/content/badge";
 import { isStaleUpdate, verdictPresentation, DISMISS_ID } from "../src/content/presentation";
@@ -194,6 +203,47 @@ describe("the data: source to read", () => {
     expect(dataUrlToRead("data:image/png;base64,", "data:image/png;base64,", root)).toBe("data:image/png;base64,AAAA");
     // Nothing on the page matches at all.
     expect(dataUrlToRead("data:image/png;base64,", undefined, { querySelectorAll: () => [] } as unknown as ParentNode)).toBeUndefined();
+  });
+});
+
+describe("rememberDataUrl", () => {
+  const dataUrl = (chars: number): string => `data:image/png;base64,${"A".repeat(chars - "data:image/png;base64,".length)}`;
+
+  test("keeps the full URL and ignores the payload-free repeat", () => {
+    const map = new Map<string, string>();
+    rememberDataUrl(map, "c1", "data:image/png;base64,AAAA");
+    rememberDataUrl(map, "c1", "data:image/png;base64,");
+    expect(map.get("c1")).toBe("data:image/png;base64,AAAA");
+  });
+
+  test("a non-data: URL forgets the check", () => {
+    const map = new Map([["c1", "data:image/png;base64,AAAA"]]);
+    rememberDataUrl(map, "c1", "https://cdn.example/a.png");
+    expect(map.has("c1")).toBe(false);
+  });
+
+  test("evicts the oldest by count", () => {
+    const map = new Map<string, string>();
+    for (let i = 0; i <= MAX_REMEMBERED_DATA_URLS; i += 1) rememberDataUrl(map, `c${i}`, `data:image/png;base64,${i}`);
+    expect(map.size).toBe(MAX_REMEMBERED_DATA_URLS);
+    expect(map.has("c0")).toBe(false);
+    expect(map.has(`c${MAX_REMEMBERED_DATA_URLS}`)).toBe(true);
+  });
+
+  test("evicts the oldest by total size, not just count", () => {
+    const map = new Map<string, string>();
+    const third = Math.floor(MAX_REMEMBERED_DATA_CHARS / 3) + 1;
+    rememberDataUrl(map, "a", dataUrl(third));
+    rememberDataUrl(map, "b", dataUrl(third));
+    rememberDataUrl(map, "c", dataUrl(third));
+    expect([...map.keys()]).toEqual(["b", "c"]);
+  });
+
+  test("a URL over the cap is not kept, and drops the stale entry for that check", () => {
+    const map = new Map([["a", "data:image/png;base64,AAAA"]]);
+    rememberDataUrl(map, "big", dataUrl(MAX_REMEMBERED_DATA_CHARS + 1));
+    expect(map.has("big")).toBe(false);
+    expect(map.get("a")).toBe("data:image/png;base64,AAAA");
   });
 });
 

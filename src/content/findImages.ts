@@ -69,3 +69,32 @@ export function dataUrlToRead(stored: string, knownSource: string | undefined, r
   }
   return findSourceByPrefix(stored, root);
 }
+
+export const MAX_REMEMBERED_DATA_URLS = 16;
+export const MAX_REMEMBERED_DATA_CHARS = 8 * 1024 * 1024;
+
+/**
+ * Remembers the data: URL each check was about, oldest evicted first. Bounded by
+ * count and by total characters, because a data: URL is as large as the image it
+ * carries; one too large to keep is left to the prefix match and the hash check.
+ */
+export function rememberDataUrl(remembered: Map<string, string>, checkId: string, srcUrl: string): void {
+  if (!srcUrl.startsWith("data:")) {
+    remembered.delete(checkId);
+    return;
+  }
+  // The worker's OpenAI done update repeats the payload-free URL; the full one
+  // must not be replaced by it, or a later read fetches an empty image.
+  const existing = remembered.get(checkId);
+  if (existing !== undefined && existing.length >= srcUrl.length) return;
+  remembered.delete(checkId);
+  if (srcUrl.length > MAX_REMEMBERED_DATA_CHARS) return;
+  remembered.set(checkId, srcUrl);
+  let total = 0;
+  for (const url of remembered.values()) total += url.length;
+  for (const [oldest, url] of remembered) {
+    if (remembered.size <= MAX_REMEMBERED_DATA_URLS && total <= MAX_REMEMBERED_DATA_CHARS) break;
+    remembered.delete(oldest);
+    total -= url.length;
+  }
+}

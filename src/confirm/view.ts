@@ -9,6 +9,7 @@ export interface ConfirmParams {
   origin: string | undefined;
   mediaType: string;
   sizeBytes: number | undefined;
+  converted: boolean;
 }
 
 function optionalText(value: string | null): string | undefined {
@@ -29,6 +30,7 @@ export function parseConfirmParams(search: string): ConfirmParams {
     origin: optionalText(params.get("origin")),
     mediaType: optionalText(params.get("mediaType")) ?? "",
     sizeBytes: optionalSize(params.get("sizeBytes")),
+    converted: params.get("converted") === "1",
   };
 }
 

@@ -33,6 +33,7 @@ function renderImageDetails(image: ConfirmParams): void {
     ["confirm-type", image.mediaType === "" ? undefined : message("confirm_type", [image.mediaType])],
     ["confirm-size", size === undefined ? undefined : message("confirm_size", [size])],
   ];
+  document.getElementById("confirm-converted")?.toggleAttribute("hidden", !image.converted);
   for (const [id, text] of lines) {
     const element = document.getElementById(id);
     if (element === null) continue;
