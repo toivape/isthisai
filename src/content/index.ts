@@ -66,10 +66,31 @@ function createShell(): ContentShell {
 
   let popup: PopupHandle | undefined;
   const badges = new Map<HTMLImageElement, HTMLDivElement>();
-  // Which URL each check was about. The OpenAI flow re-reads a data: image, and
-  // its cached srcUrl has no payload, so the page supplies the exact URL here
-  // rather than guessing between two data: images of the same type.
+  // The data: image each recent check was about. A data: image is the only case
+  // the OpenAI flow cannot re-fetch on its own: the check record stores its URL
+  // without the payload (PLAN §3), so the page supplies the real one rather than
+  // guessing between two data: images of the same type. Bounded, because a data:
+  // URL is as large as the image it carries.
   const checkedSrcUrls = new Map<string, string>();
+  const MAX_REMEMBERED_DATA_URLS = 16;
+
+  function rememberSrcUrl(checkId: string, srcUrl: string): void {
+    if (!srcUrl.startsWith("data:")) {
+      checkedSrcUrls.delete(checkId);
+      return;
+    }
+    // The worker's OpenAI done update repeats the payload-free URL; the full one
+    // must not be replaced by it, or a later read fetches an empty image.
+    const remembered = checkedSrcUrls.get(checkId);
+    if (remembered !== undefined && remembered.length >= srcUrl.length) return;
+    checkedSrcUrls.delete(checkId);
+    checkedSrcUrls.set(checkId, srcUrl);
+    if (checkedSrcUrls.size > MAX_REMEMBERED_DATA_URLS) {
+      const oldest = checkedSrcUrls.keys().next().value;
+      if (oldest !== undefined) checkedSrcUrls.delete(oldest);
+    }
+  }
+
   let activeCheckId: string | undefined;
 
   type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
@@ -187,7 +208,7 @@ function createShell(): ContentShell {
 
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
-    checkedSrcUrls.set(update.checkId, update.srcUrl);
+    rememberSrcUrl(update.checkId, update.srcUrl);
     if (isStaleUpdate(activeCheckId, update)) return;
     closePopup();
     if (update.status === "failed") {

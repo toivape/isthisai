@@ -189,6 +189,9 @@ describe("the data: source to read", () => {
     expect(dataUrlToRead("data:image/png;base64,", undefined, root)).toBe("data:image/png;base64,AAAA");
     // A remembered URL that no longer matches the stored prefix is not used.
     expect(dataUrlToRead("data:image/png;base64,", "https://cdn.example/other.png", root)).toBe("data:image/png;base64,AAAA");
+    // The payload-free form is what the worker's own done update remembers; it is
+    // not the image, so the page's real one is read instead of an empty payload.
+    expect(dataUrlToRead("data:image/png;base64,", "data:image/png;base64,", root)).toBe("data:image/png;base64,AAAA");
     // Nothing on the page matches at all.
     expect(dataUrlToRead("data:image/png;base64,", undefined, { querySelectorAll: () => [] } as unknown as ParentNode)).toBeUndefined();
   });

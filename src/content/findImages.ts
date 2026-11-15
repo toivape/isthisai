@@ -57,11 +57,15 @@ export function findSourceByPrefix(prefix: string, root: ParentNode = document):
 
 /**
  * The URL to read for a payload-free data: source. Two data: images of the same
- * type share the stripped prefix, so the exact URL the check saw wins when it
- * still matches; otherwise the first prefix match is used and the worker's hash
- * check rejects it rather than uploading the wrong image.
+ * type share the stripped prefix, so a remembered URL wins — but only when it is
+ * longer than the stored prefix, i.e. actually carries a payload: the worker's
+ * own OpenAI done update sends the payload-free form, and reading that would
+ * fetch an empty image. Otherwise the first prefix match is used and the
+ * worker's hash check rejects it rather than uploading the wrong image.
  */
 export function dataUrlToRead(stored: string, knownSource: string | undefined, root: ParentNode = document): string | undefined {
-  if (knownSource !== undefined && knownSource.startsWith(stored)) return knownSource;
+  if (knownSource !== undefined && knownSource.length > stored.length && knownSource.startsWith(stored)) {
+    return knownSource;
+  }
   return findSourceByPrefix(stored, root);
 }

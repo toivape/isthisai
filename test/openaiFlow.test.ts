@@ -543,6 +543,33 @@ describe("runOpenAiFlow: merge, cache and report", () => {
     if (done.status !== "done") throw new Error("expected a done update");
     expect(done.result).toEqual(completed);
   });
+
+  test("the merge uses the freshest stored result, not the one read before the upload", async () => {
+    // A local re-check of the same image can write the result while the upload is
+    // in flight; merging onto the pre-upload read would undo it.
+    const f = await fixture(minimalPng(), "image/png");
+    const newer = storedResult({
+      imageHash: f.imageHash,
+      verdict: "ai_signal",
+      localC2pa: { manifest: "present", aiAction: true, claimedIssuer: "OpenAI OpCo, LLC" },
+    });
+    let reads = 0;
+    const store: CacheStore = {
+      get: async (key) => {
+        if (key === `check:${CHECK_ID}`) return f.record;
+        if (key === `result:${f.imageHash}`) return reads++ < 2 ? f.stored : newer;
+        return undefined;
+      },
+      set: async () => {},
+    };
+    const { fetchImpl } = fakeFetch(minimalWebp(), provenanceResponse());
+    const h = harness({ store, reload: f.collected, key: KEY, fetchImpl });
+
+    const outcome = await run(h.deps);
+    if (outcome.kind !== "done") throw new Error("expected done");
+    expect(outcome.result.localC2pa).toEqual(newer.localC2pa);
+    expect(outcome.result.openai).toMatchObject({ state: "done" });
+  });
 });
 
 describe("serializeByImageHash", () => {

@@ -207,7 +207,11 @@ async function uploadOnce(
   const parsed = await sendProvenanceUpload(built.request, { fetchImpl: deps.fetchImpl, deadlineMs: deps.deadlineMs });
   if (!parsed.ok) return { kind: "error", error: parsed.error };
 
-  const merged = mergeOpenAi(latest ?? cached, {
+  // Re-read immediately before the merge: a local re-check of the same image may
+  // have written the result while this upload was in flight, and the merge must
+  // not resurrect the local parts from before it (or clobber its newer ones).
+  const base = (await loadResult(deps.store, record.imageHash)) ?? latest ?? cached;
+  const merged = mergeOpenAi(base, {
     state: "done",
     serverConverted,
     c2pa: parsed.result.c2pa,
