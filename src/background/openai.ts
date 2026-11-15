@@ -145,8 +145,22 @@ export function mapHttpError(status: number, retryAfter: string | null, now: num
 
 const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
 
+// Releases the connection an unread streaming body would otherwise hold open.
+// A failed release must not replace the typed error the caller needs.
+async function releaseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Nothing to release, or already released.
+  }
+}
+
 export async function readProvenanceResponse(response: Response): Promise<ParsedProvenance> {
   if (response.status < 200 || response.status >= 300) {
+    // The error body is never read, but it must not keep downloading after the
+    // caller has its answer — and the caller clears its deadline timer then
+    // (fetchImage.ts cancels its reader for the same reason).
+    await releaseBody(response);
     return { ok: false, error: mapHttpError(response.status, response.headers.get("retry-after")) };
   }
   let text: string;

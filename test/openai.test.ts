@@ -468,6 +468,27 @@ describe("readProvenanceResponse", () => {
     expect(await readProvenanceResponse(response)).toEqual({ ok: false, error: { code: "bad_response" } });
   });
 
+  test("a non-2xx response cancels its streaming body", async () => {
+    // An unread error body keeps downloading after the caller already has its
+    // answer, and the caller has cleared the deadline timer by then
+    // (fetchImage.ts cancels its reader for the same reason).
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = new Response(stream, { status: 429, headers: { "retry-after": "5" } });
+    expect(await readProvenanceResponse(response)).toEqual({
+      ok: false,
+      error: { code: "rate_limited", retryAfterSec: 5 },
+    });
+    expect(cancelled).toBe(true);
+  });
+
   test("a body that fails mid-read is a network error", async () => {
     const broken = {
       status: 200,
