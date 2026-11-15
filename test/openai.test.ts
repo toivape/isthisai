@@ -5,6 +5,7 @@ import {
   PROVENANCE_URL,
   buildRequest,
   deadlineFor,
+  isSendableKey,
   mapHttpError,
   parseResponse,
   readProvenanceResponse,
@@ -122,6 +123,21 @@ describe("buildRequest: the key", () => {
     let visible = "";
     for (let code = 0x21; code <= 0x7e; code++) visible += String.fromCharCode(code);
     expect(buildRequest(visible, JPEG_BYTES, "image/jpeg").ok).toBe(true);
+  });
+});
+
+describe("isSendableKey", () => {
+  test("accepts a key padded with whitespace, the way a pasted key arrives", () => {
+    // The OpenAI flow tests the stored key before buildRequest trims it, so the
+    // trim has to live in isSendableKey as well (a trailing newline is common).
+    expect(isSendableKey(`  ${KEY}\n`)).toBe(true);
+  });
+
+  test("rejects a blank key and any character fetch could not put in a header", () => {
+    expect(isSendableKey("")).toBe(false);
+    expect(isSendableKey("   ")).toBe(false);
+    expect(isSendableKey("two\nlines")).toBe(false);
+    expect(isSendableKey("tab\tbed")).toBe(false);
   });
 });
 

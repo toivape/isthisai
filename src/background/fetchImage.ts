@@ -11,6 +11,10 @@ import type { CheckError, ReadBlob, ReadBlobReply } from "../shared/types";
 // Brave's <img> request Accept value, copied from DevTools (Network, Img).
 export const IMAGE_ACCEPT = "image/jxl,image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
 
+// What the OpenAI upload path asks for when the image is a format the API does
+// not take (PLAN §4 step 8.4): the CDN may hand back a converted copy.
+export const CONVERT_ACCEPT = "image/webp,image/png,image/jpeg";
+
 export type ImageBytes = { kind: "bytes"; bytes: Uint8Array; mediaType: string } | { kind: "error"; error: CheckError };
 
 const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
@@ -75,6 +79,8 @@ export function decodeDataUrl(url: string, maxBytes: number = MAX_IMAGE_BYTES): 
 export interface FetchImageOptions {
   fetchImpl?: typeof fetch;
   deadlineMs?: number;
+  /** Overrides the image Accept header (defaults to IMAGE_ACCEPT). */
+  accept?: string;
 }
 
 export async function fetchImageBytes(url: string, options: FetchImageOptions = {}): Promise<ImageBytes> {
@@ -87,7 +93,7 @@ export async function fetchImageBytes(url: string, options: FetchImageOptions = 
     try {
       response = await doFetch(url, {
         credentials: "omit",
-        headers: { Accept: IMAGE_ACCEPT },
+        headers: { Accept: options.accept ?? IMAGE_ACCEPT },
         signal: controller.signal,
       });
     } catch (error) {
@@ -135,6 +141,13 @@ export async function fetchImageBytes(url: string, options: FetchImageOptions = 
   }
 }
 
+/** The server-converted re-fetch (PLAN §4 step 8.4): the same URL, asked for a
+ * format OpenAI accepts. Callers sniff the reply and must still reject a type it
+ * does not take. */
+export async function fetchConvertedImage(url: string, options: FetchImageOptions = {}): Promise<ImageBytes> {
+  return fetchImageBytes(url, { ...options, accept: CONVERT_ACCEPT });
+}
+
 /** Decodes a content-script blob reply; the payload cap keeps messages under 64 MiB. */
 export function decodeBase64WithLimit(base64: string, maxBytes: number): ImageBytes | { kind: "error"; error: CheckError } {
   const byteLength = Math.floor((base64.length * 3) / 4) - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
@@ -160,11 +173,20 @@ export interface CollectImageDeps {
   readBlob: (url: string) => Promise<ReadBlobReply>;
 }
 
+// The cached form of a page's data: image has had its payload removed to keep
+// the session quota (cache.ts). Nothing is left to decode, so those bytes can
+// only come from the page, like a blob: URL.
+function isPayloadFreeDataUrl(url: string): boolean {
+  if (!url.startsWith("data:")) return false;
+  const comma = url.indexOf(",");
+  return comma === -1 || comma === url.length - 1;
+}
+
 export async function collectImage(url: string, deps: CollectImageDeps): Promise<CollectedImage> {
   let bytes: ImageBytes;
-  if (url.startsWith("data:")) {
+  if (url.startsWith("data:") && !isPayloadFreeDataUrl(url)) {
     bytes = decodeDataUrl(url);
-  } else if (url.startsWith("blob:")) {
+  } else if (url.startsWith("blob:") || isPayloadFreeDataUrl(url)) {
     const reply = await deps.readBlob(url).catch((): ReadBlobReply => ({ ok: false }));
     if (!reply.ok) return { kind: "error", error: { code: reply.reason === "too_large" ? "too_large" : "fetch_failed" } };
     bytes = decodeBase64WithLimit(reply.base64, MAX_BLOB_BYTES);

@@ -31,9 +31,14 @@ const EXTENSIONS: Record<string, string> = {
 // otherwise surface as a network error.
 const SENDABLE_KEY = /^[\x21-\x7e]+$/;
 
+/** True when the key can appear in an Authorization header value at all. */
+export function isSendableKey(key: string): boolean {
+  return SENDABLE_KEY.test(key.trim());
+}
+
 export function buildRequest(key: string, bytes: Uint8Array, mediaType: string): BuiltRequest {
   const trimmed = key.trim();
-  if (!SENDABLE_KEY.test(trimmed)) return { ok: false, error: { code: "invalid_key" } };
+  if (!isSendableKey(trimmed)) return { ok: false, error: { code: "invalid_key" } };
   // No Content-Type header: FormData sets it together with the boundary.
   const body = new FormData();
   // Cast only, not bytes.buffer: the buffer would ignore a subarray's offset.

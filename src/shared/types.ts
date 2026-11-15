@@ -94,6 +94,11 @@ export type ReadBlobReply = { ok: true; base64: string } | { ok: false; reason?:
 // content script -> worker
 export type OpenAiRequest = { type: "openaiRequest"; checkId: string };
 
+// worker -> content script answer to an openaiRequest. A request from a sender
+// that does not own the check is ignored and answered with nothing at all; an
+// OpenAI error travels back here rather than as a cached result.
+export type OpenAiRequestReply = { ok: true } | { ok: false; error: OpenAiError };
+
 // confirmation window -> worker
 export type ConfirmUpload = { type: "confirmUpload"; checkId: string; confirmed: boolean };
 
@@ -249,6 +254,10 @@ export function isOpenAiRequest(value: unknown): value is OpenAiRequest {
   return hasType(value, "openaiRequest") && hasString(value, "checkId");
 }
 
+export function isOpenAiRequestReply(value: unknown): value is OpenAiRequestReply {
+  return isAck(value);
+}
+
 export function isConfirmUpload(value: unknown): value is ConfirmUpload {
   return hasType(value, "confirmUpload") && hasString(value, "checkId") && typeof value.confirmed === "boolean";
 }
@@ -257,10 +266,14 @@ export function isTestKey(value: unknown): value is TestKey {
   return hasType(value, "testKey");
 }
 
-export function isTestKeyReply(value: unknown): value is TestKeyReply {
+function isAck(value: unknown): boolean {
   if (!isObject(value)) return false;
   if (value.ok === true) return true;
   return value.ok === false && isOpenAiError(value.error);
+}
+
+export function isTestKeyReply(value: unknown): value is TestKeyReply {
+  return isAck(value);
 }
 
 export function isKeyStatus(value: unknown): value is KeyStatus {

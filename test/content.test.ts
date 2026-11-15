@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { findImages, matchesSrcUrl } from "../src/content/findImages";
+import { findImages, findImagesByPrefix, matchesSrcPrefix, matchesSrcUrl } from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
 import { isBadgeVisible, shouldBadge } from "../src/content/badge";
 import { isStaleUpdate, verdictPresentation, DISMISS_ID } from "../src/content/presentation";
@@ -127,6 +127,63 @@ describe("findImages", () => {
     } as unknown as ParentNode;
     findImages("https://example.com/a.png", root);
     expect(calls).toEqual(["img"]);
+  });
+});
+
+describe("matchesSrcPrefix / findImagesByPrefix", () => {
+  // The cache stores a data: srcUrl without its payload (PLAN §3), so the upload
+  // flow asks the page for the image by that prefix. A wrong match is caught by
+  // the worker's hash check rather than uploaded.
+
+  test("matches an image whose data: src starts with the payload-free prefix", () => {
+    const img = fakeImage({ src: "data:image/png;base64,AAAA", currentSrc: "data:image/png;base64,AAAA" });
+    expect(matchesSrcPrefix(img, "data:image/png;base64,")).toBe(true);
+  });
+
+  test("matches by currentSrc when src is a lazy placeholder", () => {
+    const img = fakeImage({ src: "placeholder.gif", currentSrc: "data:image/png;base64,AAAA" });
+    expect(matchesSrcPrefix(img, "data:image/png;base64,")).toBe(true);
+  });
+
+  test("does not match a different media type or a non-data image", () => {
+    const jpeg = fakeImage({ src: "data:image/jpeg;base64,AAAA", currentSrc: "data:image/jpeg;base64,AAAA" });
+    expect(matchesSrcPrefix(jpeg, "data:image/png;base64,")).toBe(false);
+    const http = fakeImage({ src: "https://example.com/a.png", currentSrc: "https://example.com/a.png" });
+    expect(matchesSrcPrefix(http, "data:")).toBe(false);
+  });
+
+  test("an empty prefix never matches: it would match everything", () => {
+    const img = fakeImage({ src: "data:image/png;base64,AAAA", currentSrc: "data:image/png;base64,AAAA" });
+    expect(matchesSrcPrefix(img, "")).toBe(false);
+  });
+
+  test("rejects a non-image value and a missing src or currentSrc", () => {
+    expect(matchesSrcPrefix(null, "data:")).toBe(false);
+    expect(matchesSrcPrefix({}, "data:")).toBe(false);
+    expect(matchesSrcPrefix({ src: "data:x" }, "data:")).toBe(false);
+    expect(matchesSrcPrefix({ currentSrc: "data:x" }, "data:")).toBe(false);
+  });
+
+  test("an empty src is not resolved against the baseURI into a prefix match", () => {
+    // <img src=""> resolves to the page URL. The guard must reject it before
+    // resolvedSrc turns it into a document URL that could match the prefix.
+    const img = fakeImage({ src: "", currentSrc: "placeholder", baseURI: "https://example.com/page.html" });
+    expect(matchesSrcPrefix(img, "https://example.com/page")).toBe(false);
+  });
+
+  test("findImagesByPrefix returns every matching image, in document order", () => {
+    const a = fakeImage({ src: "data:image/png;base64,AAAA", currentSrc: "data:image/png;base64,AAAA" });
+    const other = fakeImage({ src: "data:image/jpeg;base64,CCCC", currentSrc: "data:image/jpeg;base64,CCCC" });
+    const b = fakeImage({ src: "data:image/png;base64,BBBB", currentSrc: "data:image/png;base64,BBBB" });
+    const root = { querySelectorAll: (selector: string) => (selector === "img" ? [a, other, b] : []) } as unknown as ParentNode;
+    expect(findImagesByPrefix("data:image/png;base64,", root)).toEqual([a, b]);
+  });
+
+  test("matches by resolved src when currentSrc does not carry it", () => {
+    // The page may expose the URL only through src; the prefix match must still
+    // reach it through resolvedSrc.
+    const img = fakeImage({ src: "data:image/png;base64,AAAA", currentSrc: "placeholder" });
+    expect(matchesSrcPrefix(img, "data:image/png;base64,")).toBe(true);
   });
 });
 

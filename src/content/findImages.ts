@@ -30,3 +30,19 @@ export function matchesSrcUrl(img: unknown, srcUrl: string): boolean {
 export function findImages(srcUrl: string, root: ParentNode = document): HTMLImageElement[] {
   return [...root.querySelectorAll("img")].filter((img) => matchesSrcUrl(img, srcUrl));
 }
+
+// The upload flow re-reads a page's data: image after the cache stripped its
+// payload (PLAN §3), so it can only match by the prefix that is left. An empty
+// prefix must never match, or every image would qualify.
+export function matchesSrcPrefix(img: unknown, prefix: string): boolean {
+  if (prefix === "") return false;
+  const source = img as Partial<ImageSource> | null;
+  if (typeof source?.src !== "string" || typeof source.currentSrc !== "string") return false;
+  if (source.currentSrc.startsWith(prefix)) return true;
+  if (source.src === "") return false;
+  return resolvedSrc(source as ImageSource).startsWith(prefix);
+}
+
+export function findImagesByPrefix(prefix: string, root: ParentNode = document): HTMLImageElement[] {
+  return [...root.querySelectorAll("img")].filter((img) => matchesSrcPrefix(img, prefix));
+}
