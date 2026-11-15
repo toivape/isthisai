@@ -6,6 +6,19 @@
   </head>
   <body>
     <h1 data-i18n="options_headline"></h1>
+
+    <label for="key" data-i18n="options_key_label"></label>
+    <input id="key" type="password" autocomplete="off" spellcheck="false" />
+    <button id="save" data-i18n="options_save_button"></button>
+    <button id="clear" data-i18n="options_clear_button"></button>
+    <p id="status" role="status"></p>
+    <p data-i18n="options_advice"></p>
+
+    <h2 data-i18n="options_test_button"></h2>
+    <button id="test" data-i18n="options_test_button"></button>
+    <p data-i18n="options_test_note"></p>
+    <p id="test-result" role="status"></p>
+
     <p data-i18n="options_privacy"></p>
     <script type="module" src="./options.ts"></script>
   </body>

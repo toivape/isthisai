@@ -11,8 +11,95 @@
   "options_headline": {
     "message": "OpenAI API key"
   },
+  "options_key_label": {
+    "message": "API key"
+  },
+  "options_key_label_placeholder": {
+    "message": "Paste your key"
+  },
+  "options_save_button": {
+    "message": "Save key"
+  },
+  "options_clear_button": {
+    "message": "Clear key"
+  },
+  "options_key_saved": {
+    "message": "A key is saved. It is never shown again, not even to you."
+  },
+  "options_key_absent": {
+    "message": "No key saved."
+  },
+  "options_advice": {
+    "message": "Use a dedicated project key with a spend limit of its own."
+  },
+  "options_test_button": {
+    "message": "Test key"
+  },
+  "options_test_note": {
+    "message": "Sends one bundled sample image to OpenAI, never your own image or the image you checked. Checks are currently free, but rate limits are strict."
+  },
+  "options_test_sending": {
+    "message": "Testing the key…"
+  },
+  "options_test_ok": {
+    "message": "The key works."
+  },
   "options_privacy": {
-    "message": "Local checks (Content Credentials and image metadata) run on this machine and are never uploaded. An OpenAI check runs only after you confirm it in a separate window; it sends the image to OpenAI and may be billed. Use a dedicated project key with a spend limit."
+    "message": "Local checks (Content Credentials and image metadata) run on this machine and are never uploaded. An OpenAI check runs only after you confirm it in a separate window, which sends that image to OpenAI; OpenAI states that uploaded content is not stored unless legally required and is not used to train models. Checks are currently free, but rate limits are strict. No other requests are made."
+  },
+  "error_openai_no_key": {
+    "message": "No API key is saved, so nothing was uploaded."
+  },
+  "error_openai_invalid_key": {
+    "message": "The saved key cannot be used as a request header. Save it again."
+  },
+  "error_openai_cancelled": {
+    "message": "Upload cancelled."
+  },
+  "error_openai_check_expired": {
+    "message": "The check expired. Check the image again."
+  },
+  "error_openai_hash_mismatch": {
+    "message": "The image changed since it was checked, so nothing was uploaded."
+  },
+  "error_openai_unsupported_type": {
+    "message": "OpenAI does not accept this image type."
+  },
+  "error_openai_fetch_failed": {
+    "message": "The image could not be downloaded."
+  },
+  "error_openai_timeout": {
+    "message": "The request timed out."
+  },
+  "error_openai_http_400": {
+    "message": "OpenAI rejected the file (400). It may be unsupported or too large."
+  },
+  "error_openai_http_401": {
+    "message": "The API key was rejected (401). Check the key and save it again."
+  },
+  "error_openai_http_404": {
+    "message": "This OpenAI organisation does not have access to the check (404)."
+  },
+  "error_openai_http_4xx": {
+    "message": "OpenAI rejected the request."
+  },
+  "error_openai_http_5xx": {
+    "message": "OpenAI reported a server error. Try again later."
+  },
+  "error_openai_rate_limited": {
+    "message": "OpenAI rate limit reached. Try again later."
+  },
+  "error_openai_rate_limited_after": {
+    "message": "OpenAI rate limit reached. Try again in $1 seconds."
+  },
+  "error_openai_network": {
+    "message": "Network error. Check your connection."
+  },
+  "error_openai_bad_response": {
+    "message": "Unexpected response from OpenAI."
+  },
+  "error_openai_unusable_reply": {
+    "message": "The extension did not get a usable reply from its own worker. Reload the extension."
   },
   "confirm_title": {
     "message": "Check with OpenAI?"
