@@ -27,7 +27,7 @@ export function parseConfirmParams(search: string): ConfirmParams {
   return {
     checkId: params.get("checkId") ?? "",
     origin: optionalText(params.get("origin")),
-    mediaType: params.get("mediaType") ?? "",
+    mediaType: optionalText(params.get("mediaType")) ?? "",
     sizeBytes: optionalSize(params.get("sizeBytes")),
   };
 }

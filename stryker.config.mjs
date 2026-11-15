@@ -19,15 +19,20 @@ export default {
   ignorePatterns: [".scratch/**", "dist/**", "reports/**"],
   // Only unit-tested pure logic is mutated. The exclusions are surfaces that
   // CLAUDE.md and PLAN.md §8 cover by manual testing in Brave instead of unit
-  // tests: the chrome wiring in background/index.ts, the DOM shell in
-  // content/index.ts, the blob reader (no unit test), the options/confirm
-  // pages, and the i18n wrapper and size-limit constants.
+  // tests: the chrome wiring in background/index.ts and confirm/confirm.ts, the
+  // DOM shell in content/index.ts, the blob reader (no unit test), the options
+  // page, and the i18n wrapper and size-limit constants.
+  //
+  // Excluded by file, not by directory: confirm/view.ts is pure and unit-tested,
+  // so it stays in scope. A page's directory says nothing about whether its
+  // logic is testable, and excluding a directory silently drops whatever pure
+  // module later lands in it.
   mutate: [
     "src/**/*.ts",
     "!src/background/index.ts",
     "!src/content/index.ts",
     "!src/content/readBlob.ts",
-    "!src/confirm/**",
+    "!src/confirm/confirm.ts",
     "!src/options/**",
     "!src/shared/i18n.ts",
     "!src/shared/limits.ts",

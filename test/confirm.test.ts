@@ -23,11 +23,30 @@ describe("parseConfirmParams", () => {
     expect(parseConfirmParams("?checkId=c1&origin=").origin).toBeUndefined();
   });
 
+  test("whitespace-only values are absent, not rendered blank", () => {
+    const padded = parseConfirmParams("?checkId=c1&origin=%20&mediaType=%20&sizeBytes=%20");
+    expect(padded.origin).toBeUndefined();
+    expect(padded.mediaType).toBe("");
+    expect(padded.sizeBytes).toBeUndefined();
+  });
+
+  test("absent parameters fall back rather than leaking undefined", () => {
+    const bare = parseConfirmParams("");
+    expect(bare.checkId).toBe("");
+    expect(bare.mediaType).toBe("");
+    expect(bare.origin).toBeUndefined();
+    expect(bare.sizeBytes).toBeUndefined();
+  });
+
   test("an absent or unparseable size is absent rather than zero", () => {
     expect(parseConfirmParams("?checkId=c1").sizeBytes).toBeUndefined();
     expect(parseConfirmParams("?checkId=c1&sizeBytes=").sizeBytes).toBeUndefined();
     expect(parseConfirmParams("?checkId=c1&sizeBytes=not-a-number").sizeBytes).toBeUndefined();
     expect(parseConfirmParams("?checkId=c1&sizeBytes=-5").sizeBytes).toBeUndefined();
+  });
+
+  test("a size of zero is a size, not an absent one", () => {
+    expect(parseConfirmParams("?checkId=c1&sizeBytes=0").sizeBytes).toBe(0);
   });
 });
 
@@ -37,6 +56,14 @@ describe("formatSize", () => {
     expect(formatSize(2048)).toBe("2.0 KiB");
     expect(formatSize(459248)).toBe("448.5 KiB");
     expect(formatSize(1572864)).toBe("1.5 MiB");
+  });
+
+  test("each unit boundary belongs to the larger unit", () => {
+    expect(formatSize(0)).toBe("0 B");
+    expect(formatSize(1023)).toBe("1023 B");
+    expect(formatSize(1024)).toBe("1.0 KiB");
+    expect(formatSize(1048575)).toBe("1024.0 KiB");
+    expect(formatSize(1048576)).toBe("1.0 MiB");
   });
 
   test("an absent size renders nothing", () => {
