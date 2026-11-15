@@ -6,10 +6,10 @@ import {
   mapReloadError,
   runOpenAiFlow,
   senderMatches,
-  serializeByImageHash,
+  uploadRegistry,
   type OpenAiFlowDeps,
   type OpenAiFlowOutcome,
-  type SerializeUploads,
+  type UploadRegistry,
 } from "../src/background/openaiFlow";
 import type { CheckErrorCode, CheckRecord, CheckResult, CheckUpdate, OpenAiErrorCode } from "../src/shared/types";
 import { minimalGif, minimalPng, minimalWebp } from "./helpers/images";
@@ -105,8 +105,8 @@ interface HarnessOptions {
   fetchImpl?: typeof fetch;
   /** Overrides the in-memory store (for storage-failure cases). */
   store?: CacheStore;
-  /** Overrides the per-hash upload lock (for concurrency cases). */
-  serialize?: SerializeUploads;
+  /** Overrides the upload registry (for concurrency and dedup cases). */
+  uploads?: UploadRegistry;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -142,9 +142,9 @@ function harness(options: HarnessOptions = {}) {
     readKey,
     requestConsent,
     readImage,
-    // A fresh lock per harness keeps the tests hermetic; the concurrency test
+    // A fresh registry per harness keeps the tests hermetic; the concurrency test
     // shares one across two flows on purpose.
-    serialize: options.serialize ?? serializeByImageHash(),
+    uploads: options.uploads ?? uploadRegistry(),
     sendUpdate: (update) => {
       updates.push(update);
     },
@@ -572,9 +572,9 @@ describe("runOpenAiFlow: merge, cache and report", () => {
   });
 });
 
-describe("serializeByImageHash", () => {
+describe("uploadRegistry", () => {
   test("runs one upload per hash and hands its outcome to a later caller", async () => {
-    const serialize = serializeByImageHash();
+    const registry = uploadRegistry();
     let started = 0;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -586,27 +586,38 @@ describe("serializeByImageHash", () => {
       return { kind: "ignored" };
     };
 
-    const first = serialize("hash", run);
-    const second = serialize("hash", run);
+    const first = registry.run("hash", run);
+    const second = registry.run("hash", run);
     expect(started).toBe(1);
     release();
     expect(await first).toEqual(await second);
     expect(started).toBe(1);
 
     // Once it has settled, a new caller starts a fresh run.
-    await expect(serialize("hash", run)).resolves.toEqual({ kind: "ignored" });
+    await expect(registry.run("hash", run)).resolves.toEqual({ kind: "ignored" });
     expect(started).toBe(2);
   });
 
   test("different hashes do not wait for each other", async () => {
-    const serialize = serializeByImageHash();
+    const registry = uploadRegistry();
     const started: string[] = [];
     const run = (tag: string) => async (): Promise<OpenAiFlowOutcome> => {
       started.push(tag);
       return { kind: "ignored" };
     };
-    await Promise.all([serialize("a", run("a")), serialize("b", run("b"))]);
+    await Promise.all([registry.run("a", run("a")), registry.run("b", run("b"))]);
     expect(started).toEqual(["a", "b"]);
+  });
+
+  test("remembers a success and never an error, so an error stays retryable", async () => {
+    const registry = uploadRegistry();
+    const result = storedResult({ imageHash: "h" });
+
+    await registry.run("h", async () => ({ kind: "error", error: { code: "network" } }));
+    expect(registry.get("h")).toBeUndefined();
+
+    await registry.run("h", async () => ({ kind: "done", result }));
+    expect(registry.get("h")).toEqual(result);
   });
 });
 
@@ -639,14 +650,14 @@ describe("runOpenAiFlow: one upload per image", () => {
       return provenanceResponse({}, { outcome: "detected" });
     }) as unknown as typeof fetch;
 
-    const serialize = serializeByImageHash();
+    const registry = uploadRegistry();
     const updates: Array<{ checkId: string; update: CheckUpdate }> = [];
     const depsFor = (checkId: string): OpenAiFlowDeps => ({
       store,
       readKey: async () => KEY,
       requestConsent: async () => true,
       readImage: async () => f.collected,
-      serialize,
+      uploads: registry,
       sendUpdate: (update) => {
         updates.push({ checkId, update });
       },
@@ -665,5 +676,41 @@ describe("runOpenAiFlow: one upload per image", () => {
     expect(b).toEqual(a);
     expect(updates.map((entry) => entry.checkId).sort()).toEqual(["c1", "c2"]);
     expect(updates.every((entry) => entry.update.status === "done")).toBe(true);
+  });
+
+  test("an upload that succeeded is not repeated when its cache write failed", async () => {
+    // The done marker is written after the upload, so a rejected result write
+    // leaves the cache saying not_checked; the worker's own memory is what keeps
+    // the image from being sent a second time in the same worker lifetime.
+    const f = await fixture(minimalPng(), "image/png");
+    const store: CacheStore = {
+      get: async (key) => {
+        if (key === `check:${CHECK_ID}`) return f.record;
+        if (key === `result:${f.imageHash}`) return f.stored;
+        return undefined;
+      },
+      set: async () => {
+        throw new Error("Session storage quota bytes exceeded");
+      },
+    };
+    const { fetchImpl, uploads } = fakeFetch(minimalWebp(), provenanceResponse({}, { outcome: "detected" }));
+    const registry = uploadRegistry();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const first = harness({ store, reload: f.collected, key: KEY, fetchImpl, uploads: registry });
+      expect((await run(first.deps)).kind).toBe("done");
+      expect(uploads()).toHaveLength(1);
+
+      // A second check of the same image: the cache still says not_checked, but
+      // no second window is opened and nothing is uploaded.
+      const second = harness({ store, reload: f.collected, key: KEY, fetchImpl, uploads: registry });
+      expect((await run(second.deps)).kind).toBe("done");
+      expect(uploads()).toHaveLength(1);
+      expect(second.consentRequests).toEqual([]);
+      expect(second.reloadCalls).toEqual([]);
+      expect(second.updates).toHaveLength(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

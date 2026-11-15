@@ -229,7 +229,7 @@ Triggered only by a context-menu click. Input: `info.srcUrl`, `info.frameUrl`, `
 9. **Interrupted checks.** If the content script gets no `done`/`failed` within 60 s of `checking` (worker stopped), it shows "Check interrupted, try again".
 
 ### Cache
-- `chrome.storage.session` only (cleared when the browser closes; image hashes are not kept as long-term history). So "not sent twice" is best-effort within one browser session: the `openai: "done"` marker is written after the upload, so a result entry that was never written (session quota, or the worker stopped mid-upload) means that image is uploaded once more.
+- `chrome.storage.session` only (cleared when the browser closes; image hashes are not kept as long-term history). So "not sent twice" is best-effort within one browser session: the worker also keeps the uploads it has made in memory, so a result entry that was never written (session quota) is still not repeated; only a worker stopped mid-upload can send that one image again.
 - Store results and check records only, never image bytes.
 - Whole-check failures (`CheckError`) and OpenAI errors are never cached, so a retry really retries. Local signal-level errors (for example a corrupt manifest) are deterministic and are cached with the result.
 - No "check again" in v0.1: a cached result is shown as is.

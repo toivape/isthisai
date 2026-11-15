@@ -20,7 +20,7 @@ import { runCheckSteps } from "./check";
 import { PendingConsents } from "./consent";
 import { readC2pa } from "./c2pa";
 import { collectImage, readBlobRequest } from "./fetchImage";
-import { runOpenAiFlow, serializeByImageHash } from "./openaiFlow";
+import { runOpenAiFlow, uploadRegistry } from "./openaiFlow";
 import { scanXmp } from "./xmp";
 import { needsPermissionRequest } from "./permissions";
 
@@ -204,10 +204,10 @@ const CONFIRM_URL_PREFIX = chrome.runtime.getURL("src/confirm/");
 // that a window the user simply closes counts as a decline (PLAN §4 step 8.2).
 const pendingConsents = new PendingConsents(CONFIRM_URL_PREFIX);
 const consentWindows = new Map<number, string>();
-// Serializes OpenAI uploads per image hash across every request (see
-// serializeByImageHash). Ephemeral: losing it on a worker restart can at worst
-// let the same image be uploaded once more.
-const uploads = serializeByImageHash();
+// One registry for the whole worker: it serializes OpenAI uploads per image and
+// remembers the ones that succeeded (see uploadRegistry). Ephemeral: a restart
+// falls back to the session cache.
+const uploads = uploadRegistry();
 
 chrome.windows.onRemoved.addListener((windowId) => {
   const checkId = consentWindows.get(windowId);
@@ -266,8 +266,8 @@ async function runOpenAiRequest(checkId: string, sender: chrome.runtime.MessageS
         collectImage(record.srcUrl, {
           readBlob: (url) => readBlobInFrame(record.tabId, record.frameId, record.checkId, url),
         }),
-      // One lock for the whole worker, so two checks of one image coalesce.
-      serialize: uploads,
+      // One registry for the whole worker, so two checks of one image coalesce.
+      uploads,
       sendUpdate: (update) => {
         if (tabId === undefined || frameId === undefined) return undefined;
         return chrome.tabs.sendMessage(tabId, update, { frameId }).catch(() => undefined);

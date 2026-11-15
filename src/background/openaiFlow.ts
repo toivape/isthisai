@@ -40,20 +40,39 @@ export type OpenAiFlowOutcome =
 export type SerializeUploads = (imageHash: string, run: () => Promise<OpenAiFlowOutcome>) => Promise<OpenAiFlowOutcome>;
 
 /**
- * One upload at a time per image hash: a caller that arrives while one is in
- * flight awaits its outcome instead of sending the same image again (PLAN §4
- * Cache: the same image is never uploaded twice in a session). Two checks of one
- * image have different checkIds but the same hash, which is what makes the hash
- * the key.
+ * The worker's memory of OpenAI uploads, keyed by image hash. It does two things:
+ * it runs one upload per image at a time (a caller that arrives while one is in
+ * flight awaits its outcome rather than sending the image again), and it
+ * remembers an upload that succeeded, so a result write that failed does not make
+ * the next check send that image again. In memory only: a worker restart leaves
+ * the session cache as the sole memory (PLAN §4 Cache).
  */
-export function serializeByImageHash(): SerializeUploads {
+export interface UploadRegistry {
+  /** The result of an upload this worker already completed for the image. */
+  get(imageHash: string): CheckResult | undefined;
+  run(imageHash: string, start: () => Promise<OpenAiFlowOutcome>): Promise<OpenAiFlowOutcome>;
+}
+
+export function uploadRegistry(): UploadRegistry {
   const inFlight = new Map<string, Promise<OpenAiFlowOutcome>>();
-  return (imageHash, run) => {
-    const existing = inFlight.get(imageHash);
-    if (existing !== undefined) return existing;
-    const outcome = run().finally(() => inFlight.delete(imageHash));
-    inFlight.set(imageHash, outcome);
-    return outcome;
+  const completed = new Map<string, CheckResult>();
+  return {
+    get: (imageHash) => completed.get(imageHash),
+    run: (imageHash, start) => {
+      const existing = inFlight.get(imageHash);
+      if (existing !== undefined) return existing;
+      // Only a success is remembered: an OpenAI error must be retryable.
+      const outcome = start()
+        .then((result) => {
+          if (result.kind === "done") completed.set(imageHash, result.result);
+          return result;
+        })
+        .finally(() => {
+          inFlight.delete(imageHash);
+        });
+      inFlight.set(imageHash, outcome);
+      return outcome;
+    },
   };
 }
 
@@ -65,8 +84,8 @@ export interface OpenAiFlowDeps extends SendProvenanceDeps {
   /** Re-obtains the stored image's bytes (network, or the page for blob:/data:). */
   readImage: (record: CheckRecord) => Promise<CollectedImage>;
   sendUpdate: (update: CheckUpdate) => void | Promise<void>;
-  /** Serializes the upload per image hash (see serializeByImageHash). */
-  serialize: SerializeUploads;
+  /** One upload per image at a time, and the memory of those uploads. */
+  uploads: UploadRegistry;
 }
 
 /** The request must come from the frame that opened the check (PLAN §4 step 8.1). */
@@ -140,6 +159,17 @@ async function sendDone(deps: OpenAiFlowDeps, record: CheckRecord, result: Check
   });
 }
 
+// The stored result is authoritative; the worker's own memory covers a result
+// that was never written (session quota) within the same worker lifetime.
+function alreadyUploaded(
+  cached: CheckResult | undefined,
+  uploads: UploadRegistry,
+  imageHash: string,
+): CheckResult | undefined {
+  if (cached !== undefined && cached.openai.state === "done") return cached;
+  return uploads.get(imageHash);
+}
+
 export async function runOpenAiFlow(
   deps: OpenAiFlowDeps,
   input: { checkId: string; sender: FlowSender },
@@ -155,27 +185,26 @@ export async function runOpenAiFlow(
   // The local check wrote both entries; without the result there is nothing to
   // merge the OpenAI signals into.
   const cached = await loadResult(deps.store, record.imageHash);
-  if (cached === undefined) return { kind: "error", error: { code: "check_expired" } };
-
-  // The same image is never uploaded twice in a session (PLAN §4 Cache).
-  if (cached.openai.state === "done") {
-    await sendDone(deps, record, cached);
-    return { kind: "done", result: cached };
+  const known = alreadyUploaded(cached, deps.uploads, record.imageHash);
+  if (known !== undefined) {
+    await sendDone(deps, record, known);
+    return { kind: "done", result: known };
   }
+  if (cached === undefined) return { kind: "error", error: { code: "check_expired" } };
 
   const confirmed = await deps.requestConsent({ checkId: record.checkId, path: consentWindowPath(record) });
   if (!confirmed) return { kind: "error", error: { code: "cancelled" } };
 
-  const outcome = await deps.serialize(record.imageHash, () => uploadOnce(deps, record, cached, key));
+  const outcome = await deps.uploads.run(record.imageHash, () => uploadOnce(deps, record, cached, key));
   // The update is sent per caller, not per upload: a coalesced second check
   // still gets its own done update in its own frame.
   if (outcome.kind === "done") await sendDone(deps, record, outcome.result);
   return outcome;
 }
 
-// Runs inside the per-hash guard. The cache is re-read here, so a check of the
-// same image that completed while this window was open is reused rather than
-// uploaded again.
+// Runs inside the per-hash guard. The cache and the worker's memory are re-read
+// here, so a check of the same image that completed while this window was open is
+// reused rather than uploaded again.
 async function uploadOnce(
   deps: OpenAiFlowDeps,
   record: CheckRecord,
@@ -183,7 +212,8 @@ async function uploadOnce(
   key: string,
 ): Promise<OpenAiFlowOutcome> {
   const latest = await loadResult(deps.store, record.imageHash);
-  if (latest !== undefined && latest.openai.state === "done") return { kind: "done", result: latest };
+  const known = alreadyUploaded(latest, deps.uploads, record.imageHash);
+  if (known !== undefined) return { kind: "done", result: known };
 
   const reloaded = await deps.readImage(record);
   if (reloaded.kind === "error") return { kind: "error", error: { code: mapReloadError(reloaded.error.code) } };
