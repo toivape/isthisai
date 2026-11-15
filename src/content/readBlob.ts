@@ -8,18 +8,16 @@
 import { encodeBase64 } from "../shared/base64";
 import { MAX_BLOB_BYTES } from "../shared/limits";
 import type { ReadBlobReply } from "../shared/types";
-import { findImagesByPrefix } from "./findImages";
+import { dataUrlToRead } from "./findImages";
 
-// The stored data: URL is payload-free, so the page's own image is found by
-// prefix and its full URL is what gets fetched.
-function dataUrlSource(prefix: string): string | undefined {
-  const [img] = findImagesByPrefix(prefix);
-  if (img === undefined) return undefined;
-  return img.currentSrc === "" ? img.src : img.currentSrc;
+// The stored data: URL is payload-free. The page resolves it to the exact URL
+// the check saw, or to the image whose source carries the prefix.
+function dataUrlSource(prefix: string, knownSource: string | undefined): string | undefined {
+  return dataUrlToRead(prefix, knownSource);
 }
 
-export async function readBlobInPage(url: string): Promise<ReadBlobReply> {
-  const target = url.startsWith("data:") ? dataUrlSource(url) : url;
+export async function readBlobInPage(url: string, knownSource?: string): Promise<ReadBlobReply> {
+  const target = url.startsWith("data:") ? dataUrlSource(url, knownSource) : url;
   if (target === undefined || target === "") return { ok: false };
   let response: Response;
   try {

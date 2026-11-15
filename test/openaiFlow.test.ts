@@ -505,4 +505,34 @@ describe("runOpenAiFlow: merge, cache and report", () => {
     // The popup still gets the result it asked for.
     expect(h.updates).toHaveLength(1);
   });
+
+  test("a result completed while the window was open is not uploaded again", async () => {
+    // Two checks of the same image: this flow read not_checked, then the other
+    // one finished while this confirmation was open. Re-reading after consent is
+    // what keeps the same image from being sent twice in a session.
+    const f = await fixture(minimalPng(), "image/png");
+    const completed = storedResult({
+      imageHash: f.imageHash,
+      verdict: "ai_signal",
+      openai: { state: "done", serverConverted: false, c2pa: { outcome: "detected", validation: "trusted" }, synthid: { outcome: "not_detected" } },
+    });
+    let reads = 0;
+    const store: CacheStore = {
+      get: async (key) => {
+        if (key === `check:${CHECK_ID}`) return f.record;
+        if (key === `result:${f.imageHash}`) return reads++ === 0 ? f.stored : completed;
+        return undefined;
+      },
+      set: async () => {},
+    };
+    const { fetchImpl, uploads } = fakeFetch(minimalWebp(), provenanceResponse());
+    const h = harness({ store, reload: f.collected, key: KEY, fetchImpl });
+
+    expect(await run(h.deps)).toEqual({ kind: "done", result: completed });
+    expect(uploads()).toEqual([]);
+    expect(h.reloadCalls).toEqual([]);
+    const done = h.updates[0];
+    if (done.status !== "done") throw new Error("expected a done update");
+    expect(done.result).toEqual(completed);
+  });
 });

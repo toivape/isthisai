@@ -29,12 +29,18 @@ export class PendingConsents {
 
   /** Registers a check and settles when its window answers or is removed. */
   open(checkId: string): Promise<boolean> {
-    // A second window for the same check supersedes the first: declining the
-    // earlier one frees its flow instead of leaving it waiting forever.
+    // A second window for the same check would be a superseded one whose answer
+    // or removal could still reach this waiter; the worker refuses to open one
+    // (isWaiting), and this decline is the safety net if it ever does.
     this.decline(checkId);
     return new Promise((resolve) => {
       this.waiters.set(checkId, resolve);
     });
+  }
+
+  /** True while a window is waiting for this check's answer. */
+  isWaiting(checkId: string): boolean {
+    return this.waiters.has(checkId);
   }
 
   /**

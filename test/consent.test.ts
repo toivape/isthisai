@@ -101,4 +101,14 @@ describe("PendingConsents", () => {
     expect(pending.answer("c1", confirmSender, true)).toBe("accepted");
     await expect(second).resolves.toBe(true);
   });
+
+  test("isWaiting reports an open check and stops once it is answered", async () => {
+    const pending = new PendingConsents(CONFIRM_PREFIX);
+    expect(pending.isWaiting("c1")).toBe(false);
+    const answer = pending.open("c1");
+    expect(pending.isWaiting("c1")).toBe(true);
+    pending.answer("c1", confirmSender, false);
+    expect(pending.isWaiting("c1")).toBe(false);
+    await expect(answer).resolves.toBe(false);
+  });
 });

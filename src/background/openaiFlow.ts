@@ -144,6 +144,15 @@ export async function runOpenAiFlow(
   const confirmed = await deps.requestConsent({ checkId: record.checkId, path: consentWindowPath(record) });
   if (!confirmed) return { kind: "error", error: { code: "cancelled" } };
 
+  // The result may have been filled in while the window was open (another check
+  // of the same image, approved first). Re-read it so the same image is never
+  // uploaded twice in a session.
+  const afterConsent = await loadResult(deps.store, record.imageHash);
+  if (afterConsent !== undefined && afterConsent.openai.state === "done") {
+    await sendDone(deps, record, afterConsent);
+    return { kind: "done", result: afterConsent };
+  }
+
   const reloaded = await deps.readImage(record);
   if (reloaded.kind === "error") return { kind: "error", error: { code: mapReloadError(reloaded.error.code) } };
   if (reloaded.imageHash !== record.imageHash) return { kind: "error", error: { code: "hash_mismatch" } };

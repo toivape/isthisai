@@ -33,16 +33,35 @@ export function findImages(srcUrl: string, root: ParentNode = document): HTMLIma
 
 // The upload flow re-reads a page's data: image after the cache stripped its
 // payload (PLAN §3), so it can only match by the prefix that is left. An empty
-// prefix must never match, or every image would qualify.
-export function matchesSrcPrefix(img: unknown, prefix: string): boolean {
-  if (prefix === "") return false;
+// prefix must never match, or every image would qualify. The returned value is
+// the source that actually matched, so a caller fetches that URL and not a
+// different candidate (a srcset currentSrc, say).
+export function matchedSrcPrefix(img: unknown, prefix: string): string | undefined {
+  if (prefix === "") return undefined;
   const source = img as Partial<ImageSource> | null;
-  if (typeof source?.src !== "string" || typeof source.currentSrc !== "string") return false;
-  if (source.currentSrc.startsWith(prefix)) return true;
-  if (source.src === "") return false;
-  return resolvedSrc(source as ImageSource).startsWith(prefix);
+  if (typeof source?.src !== "string" || typeof source.currentSrc !== "string") return undefined;
+  if (source.currentSrc.startsWith(prefix)) return source.currentSrc;
+  if (source.src === "") return undefined;
+  const resolved = resolvedSrc(source as ImageSource);
+  return resolved.startsWith(prefix) ? resolved : undefined;
 }
 
-export function findImagesByPrefix(prefix: string, root: ParentNode = document): HTMLImageElement[] {
-  return [...root.querySelectorAll("img")].filter((img) => matchesSrcPrefix(img, prefix));
+/** The first image source that matches the prefix, not the first image. */
+export function findSourceByPrefix(prefix: string, root: ParentNode = document): string | undefined {
+  for (const img of root.querySelectorAll("img")) {
+    const source = matchedSrcPrefix(img, prefix);
+    if (source !== undefined) return source;
+  }
+  return undefined;
+}
+
+/**
+ * The URL to read for a payload-free data: source. Two data: images of the same
+ * type share the stripped prefix, so the exact URL the check saw wins when it
+ * still matches; otherwise the first prefix match is used and the worker's hash
+ * check rejects it rather than uploading the wrong image.
+ */
+export function dataUrlToRead(stored: string, knownSource: string | undefined, root: ParentNode = document): string | undefined {
+  if (knownSource !== undefined && knownSource.startsWith(stored)) return knownSource;
+  return findSourceByPrefix(stored, root);
 }

@@ -66,6 +66,10 @@ function createShell(): ContentShell {
 
   let popup: PopupHandle | undefined;
   const badges = new Map<HTMLImageElement, HTMLDivElement>();
+  // Which URL each check was about. The OpenAI flow re-reads a data: image, and
+  // its cached srcUrl has no payload, so the page supplies the exact URL here
+  // rather than guessing between two data: images of the same type.
+  const checkedSrcUrls = new Map<string, string>();
   let activeCheckId: string | undefined;
 
   type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
@@ -183,6 +187,7 @@ function createShell(): ContentShell {
 
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
+    checkedSrcUrls.set(update.checkId, update.srcUrl);
     if (isStaleUpdate(activeCheckId, update)) return;
     closePopup();
     if (update.status === "failed") {
@@ -214,7 +219,7 @@ function createShell(): ContentShell {
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
   chrome.runtime.onMessage.addListener((incoming: unknown): Promise<ReadBlobReply> | undefined => {
     if (!isReadBlob(incoming)) return undefined;
-    return readBlobInPage(incoming.url);
+    return readBlobInPage(incoming.url, checkedSrcUrls.get(incoming.checkId));
   });
 
   return { handleCheckUpdate };

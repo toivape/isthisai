@@ -213,6 +213,16 @@ chrome.windows.onRemoved.addListener((windowId) => {
 });
 
 async function requestConsent(checkId: string, path: string): Promise<boolean> {
+  // A window is already open for this check: never open a second one, because
+  // both carry the same checkId and the stale one could answer (or close) the
+  // replacement. The duplicate is declined; the open window owns the answer.
+  if (pendingConsents.isWaiting(checkId)) {
+    const existingWindow = windowForCheck(checkId);
+    if (existingWindow !== undefined) {
+      await chrome.windows.update(existingWindow, { focused: true }).catch(() => undefined);
+    }
+    return false;
+  }
   const answer = pendingConsents.open(checkId);
   try {
     const created = await chrome.windows.create({
@@ -229,6 +239,11 @@ async function requestConsent(checkId: string, path: string): Promise<boolean> {
     pendingConsents.decline(checkId);
   }
   return answer;
+}
+
+function windowForCheck(checkId: string): number | undefined {
+  for (const [windowId, id] of consentWindows) if (id === checkId) return windowId;
+  return undefined;
 }
 
 // The OpenAI check (PLAN §4 step 8). The flow decides everything and answers the
