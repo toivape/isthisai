@@ -123,6 +123,10 @@ function creatingActionOf(manifest: Record<string, unknown>): ActionLike | undef
 // rather than reporting a new one, so requiring it is what keeps a broken binding
 // out of the verdict. BMFF containers (AVIF/HEIC) bind through bmffHash, not
 // dataHash, hence the list.
+//
+// A mismatch for any component is checked separately, because altering an
+// assertion inside the manifest leaves the claim signature AND the image hash
+// valid: only the assertion's hashed URI reveals it.
 const SIGNATURE_CODES = ["claimSignature.validated", "claimSignature.insideValidity"];
 const BINDING_MATCH_CODES = [
   "assertion.dataHash.match",
@@ -130,13 +134,29 @@ const BINDING_MATCH_CODES = [
   "assertion.boxesHash.match",
   "assertion.collectionHash.match",
 ];
+const COMPONENT_MISMATCH_CODES = [
+  "assertion.hashedURI.mismatch",
+  "ingredient.hashedURI.mismatch",
+  "assertion.dataHash.mismatch",
+  "assertion.bmffHash.mismatch",
+  "assertion.boxesHash.mismatch",
+  "assertion.collectionHash.mismatch",
+];
+
+function statusCodeSet(entries: unknown[]): Set<unknown> {
+  return new Set(entries.map((entry) => (isObject(entry) ? entry.code : undefined)));
+}
 
 function integrityOf(validationResults: unknown): "verified" | "unverified" {
   const active = isObject(validationResults) ? validationResults.activeManifest : undefined;
   const success = isObject(active) && Array.isArray(active.success) ? active.success : [];
-  const codes = new Set(success.map((entry) => (isObject(entry) ? entry.code : undefined)));
-  const signatureValidated = SIGNATURE_CODES.every((code) => codes.has(code));
-  return signatureValidated && BINDING_MATCH_CODES.some((code) => codes.has(code)) ? "verified" : "unverified";
+  const failure = isObject(active) && Array.isArray(active.failure) ? active.failure : [];
+  const successCodes = statusCodeSet(success);
+  const failureCodes = statusCodeSet(failure);
+  const signatureValidated = SIGNATURE_CODES.every((code) => successCodes.has(code));
+  const bindingMatched = BINDING_MATCH_CODES.some((code) => successCodes.has(code));
+  const componentAltered = COMPONENT_MISMATCH_CODES.some((code) => failureCodes.has(code));
+  return signatureValidated && bindingMatched && !componentAltered ? "verified" : "unverified";
 }
 
 export function mapC2paStore(store: unknown): LocalC2pa {

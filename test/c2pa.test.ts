@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type MockInstance } from "vitest";
 import { readC2pa, mapC2paError, mapC2paStore } from "../src/background/c2pa";
 import type { LocalC2pa } from "../src/shared/types";
-import { minimalGif, minimalWebp, pngWithXmpProvenance, tamperPngDataHash } from "./helpers/images";
+import { minimalGif, minimalWebp, pngWithXmpProvenance, tamperPngAssertion, tamperPngDataHash } from "./helpers/images";
 
 const WASM_BYTES = readFileSync("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm");
 
@@ -610,6 +610,35 @@ describe("mapC2paStore: the integrity axis", () => {
     expect(mapC2paStore(storeWith("m", { m: active }, undefined, "Invalid")).integrity).toBe("unverified");
   });
 
+  test("unverified for every component mismatch code", () => {
+    // Each of these means a manifest component no longer matches what the signed
+    // claim records for it, which no match success code can be trusted over.
+    for (const code of [
+      "assertion.hashedURI.mismatch",
+      "ingredient.hashedURI.mismatch",
+      "assertion.dataHash.mismatch",
+      "assertion.bmffHash.mismatch",
+      "assertion.boxesHash.mismatch",
+      "assertion.collectionHash.mismatch",
+    ]) {
+      const results = {
+        activeManifest: {
+          success: intactResults.activeManifest.success,
+          informational: [],
+          failure: [{ code: "signingCredential.untrusted" }, { code }],
+        },
+      };
+      expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity, code).toBe("unverified");
+    }
+  });
+
+  test("verified when the only failures are about the signer, not the content", () => {
+    // The Microsoft profile-failure shape: a rejected certificate and an
+    // undecodable vendor assertion say nothing about the bytes.
+    const result = mapC2paStore(storeWith("m", { m: active }, rejectedSignerResults, "Invalid"));
+    expect(result.integrity).toBe("verified");
+  });
+
   test("a rejected signer certificate leaves the binding verified while the manifest is invalid", () => {
     const result = mapC2paStore(storeWith("m", { m: active }, rejectedSignerResults, "Invalid"));
     expect(result.manifest).toBe("invalid");
@@ -711,6 +740,16 @@ describe("readC2pa", () => {
     // Flipping one byte of the image data leaves the manifest and its actions
     // readable, but the hard binding no longer matches.
     const result = await readC2pa("image/png", tamperPngDataHash(fixture("ai-test-halloween.png")), WASM_BYTES);
+    expect(result.manifest).toBe("invalid");
+    expect(result.aiAction).toBe(true);
+    expect(result.integrity).toBe("unverified");
+  });
+
+  test("an altered assertion: AI action intact, assertion hash broken", async () => {
+    // The opposite tamper: the image and the claim are untouched, so the claim
+    // signature and the data hash both verify. Only the assertion's hashed URI
+    // shows that the manifest was edited after signing.
+    const result = await readC2pa("image/png", tamperPngAssertion(fixture("ai-test-halloween.png")), WASM_BYTES);
     expect(result.manifest).toBe("invalid");
     expect(result.aiAction).toBe(true);
     expect(result.integrity).toBe("unverified");

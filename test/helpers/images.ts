@@ -153,6 +153,22 @@ export function minimalWebp(): Uint8Array {
   ]);
 }
 
+// Flips one byte inside the PNG's embedded c2pa.actions assertion (the
+// softwareAgent name), leaving the image data and the claim untouched: the claim
+// signature and the data hash still verify, but the assertion no longer matches
+// the hash the claim records for it. The opposite tamper to tamperPngDataHash.
+export function tamperPngAssertion(bytes: Uint8Array): Uint8Array {
+  const needle = new TextEncoder().encode("ChatGPT");
+  const copy = bytes.slice();
+  for (let at = 0; at <= copy.length - needle.length; at++) {
+    if (needle.every((byte, i) => copy[at + i] === byte)) {
+      copy[at + needle.length - 1] = 0x75; // "ChatGPt" -> "ChatGPu"
+      return copy;
+    }
+  }
+  throw new Error("no c2pa.actions softwareAgent name found to alter");
+}
+
 // Flips one byte inside a PNG's first IDAT payload, leaving the C2PA caBX chunk
 // untouched: the manifest still parses and still claims an AI action, but the
 // image no longer matches its hard binding (assertion.dataHash.mismatch). The
