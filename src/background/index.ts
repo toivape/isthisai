@@ -3,8 +3,10 @@
 // at any time, so listeners are registered synchronously and no state is
 // kept in module variables.
 
-import type { CheckError, CheckUpdate, DismissPopup, ReadBlobReply } from "../shared/types";
+import type { CheckError, CheckUpdate, DismissPopup, KeyStatusReply, ReadBlobReply, TestKeyReply } from "../shared/types";
 import { resultWindowPath } from "../shared/errors";
+import { isKeyStatus, isTestKey } from "../shared/types";
+import { keyStatus, testKey } from "./apiKey";
 import { sessionStore } from "./cache";
 import { runCheckSteps } from "./check";
 import { readC2pa } from "./c2pa";
@@ -165,4 +167,31 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     console.error("permission request failed", error);
     start(false);
   });
+});
+
+// Options-page requests (issue #10). The decisions live in apiKey.ts so they are
+// unit-tested; this only wires storage and the bundled sample to them. Reading
+// the sample is not a network request: it is the extension's own resource.
+async function readStoredKey(): Promise<string | undefined> {
+  const stored: unknown = await chrome.storage.local.get("apiKey");
+  const value = (stored as { apiKey?: unknown } | undefined)?.apiKey;
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+async function loadSample(): Promise<Uint8Array> {
+  const response = await fetch(chrome.runtime.getURL("sample.png"));
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+// Returning true keeps the message channel open for the async reply.
+chrome.runtime.onMessage.addListener((incoming: unknown, _sender, sendResponse: (reply: KeyStatusReply | TestKeyReply) => void) => {
+  if (isKeyStatus(incoming)) {
+    void keyStatus({ readKey: readStoredKey }).then(sendResponse, console.error);
+    return true;
+  }
+  if (isTestKey(incoming)) {
+    void testKey({ readKey: readStoredKey, loadSample }).then(sendResponse, console.error);
+    return true;
+  }
+  return undefined;
 });

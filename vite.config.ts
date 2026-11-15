@@ -7,6 +7,7 @@ import type { Plugin } from "vite";
 // they must be registered with the watcher explicitly or dev mode goes stale.
 const NON_BUNDLED_FILES = [
   resolve("manifest.json"),
+  resolve("src/assets/sample.png"),
   ...readdirSync("_locales").flatMap((localeDir) =>
     readdirSync(join("_locales", localeDir)).map((file) => resolve("_locales", localeDir, file)),
   ),
@@ -28,6 +29,10 @@ function copyExtensionFiles(): Plugin {
       // or asset import); the worker loads it from the extension bundle via
       // chrome.runtime.getURL("c2pa.wasm") (PLAN §2 loader recipe).
       cpSync("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm", "dist/c2pa.wasm");
+      // The test-key sample is fetched by the worker at runtime; importing it
+      // would let Vite inline a 1x1 PNG as a data URL, which is not what the
+      // upload path wants (issue #10).
+      cpSync("src/assets/sample.png", "dist/sample.png");
     },
   };
 }

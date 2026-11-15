@@ -426,6 +426,7 @@ An AI signal **with** a caveat (TÄ, but the popup must qualify it):
 19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
 26. M3 (#16): with the extension loaded, check the same image twice in one browser session and confirm the session cache is populated (`chrome.storage.session` in the worker DevTools) and cleared after a browser restart; entries must never contain image bytes.
 27. M3 (#20): check the same image twice in a session: both checks finish and the second is served from `chrome.storage.session` (`result:<hash>` present in the worker DevTools); an image whose only AI signal is XMP `DigitalSourceType` shows TÄ (`test/fixtures/ai-meta-bunny.jpg` is such a file: no C2PA at all, loose XMP under the Exiv2 prefix `iptcExt:`). The second check still downloads the bytes (the SHA-256 key needs them); the cache skips the local C2PA/XMP work, which has no log line of its own.
+29. M4 (#10): open the options page. Paste a key and save: the field empties, the status line says a key is saved, and the key survives a browser restart without ever being shown again. "Test key" with a valid key says the key works; with a wrong key it shows the 401 message; on a rate-limited key it shows the rate-limit message. "Clear key" returns the status to "no key saved" and disables the test button.
 
 ---
 

@@ -11,8 +11,95 @@
   "options_headline": {
     "message": "OpenAI:n API-avain"
   },
+  "options_key_label": {
+    "message": "API-avain"
+  },
+  "options_key_label_placeholder": {
+    "message": "Liitä avain tähän"
+  },
+  "options_save_button": {
+    "message": "Tallenna avain"
+  },
+  "options_clear_button": {
+    "message": "Poista avain"
+  },
+  "options_key_saved": {
+    "message": "Avain on tallennettu. Sitä ei näytetä enää uudelleen, ei edes sinulle."
+  },
+  "options_key_absent": {
+    "message": "Avainta ei ole tallennettu."
+  },
+  "options_advice": {
+    "message": "Käytä omaa projektiavainta, jolle on asetettu oma kuluraja."
+  },
+  "options_test_button": {
+    "message": "Testaa avain"
+  },
+  "options_test_note": {
+    "message": "Lähettää OpenAIlle yhden mukana tulevan esikuvakuvan, ei koskaan omaa kuvaasi eikä tarkistamaasi kuvaa. Tarkistukset ovat tällä hetkellä maksuttomia, mutta käyttörajoja sovelletaan tiukasti."
+  },
+  "options_test_sending": {
+    "message": "Testataan avainta…"
+  },
+  "options_test_ok": {
+    "message": "Avain toimii."
+  },
   "options_privacy": {
-    "message": "Paikalliset tarkistukset (Content Credentials ja kuvan metadata) suoritetaan tällä koneella, eikä mitään lähetetä mihinkään. OpenAI-tarkistus suoritetaan vain, kun vahvistat sen erillisessä ikkunassa; se lähettää kuvan OpenAIlle ja siitä voidaan veloittaa. Käytä siihen tarkoitukseen luotua projektiavainta kulurajan kera."
+    "message": "Paikalliset tarkistukset (Content Credentials ja kuvan metadata) suoritetaan tällä koneella, eikä mitään lähetetä mihinkään. OpenAI-tarkistus suoritetaan vain, kun vahvistat sen erillisessä ikkunassa; se lähettää kyseisen kuvan OpenAIlle. OpenAI ilmoittaa, ettei lähetettyä sisältöä säilytetä ellei laki sitä vaadi, eikä sitä käytetä mallien kouluttamiseen. Tarkistukset ovat tällä hetkellä maksuttomia, mutta käyttörajoja sovelletaan tiukasti. Muita pyyntöjä ei tehdä."
+  },
+  "error_openai_no_key": {
+    "message": "API-avainta ei ole tallennettu, joten mitään ei lähetetty."
+  },
+  "error_openai_invalid_key": {
+    "message": "Tallennettua avainta ei voi käyttää pyynnön otsikkona. Tallenna se uudelleen."
+  },
+  "error_openai_cancelled": {
+    "message": "Lähetys peruutettiin."
+  },
+  "error_openai_check_expired": {
+    "message": "Tarkistus vanheni. Tarkista kuva uudelleen."
+  },
+  "error_openai_hash_mismatch": {
+    "message": "Kuva muuttui tarkistuksen jälkeen, joten mitään ei lähetetty."
+  },
+  "error_openai_unsupported_type": {
+    "message": "OpenAI ei hyväksy tätä kuvatyyppiä."
+  },
+  "error_openai_fetch_failed": {
+    "message": "Kuvan lataaminen ei onnistunut."
+  },
+  "error_openai_timeout": {
+    "message": "Pyyntö aikakatkaistiin."
+  },
+  "error_openai_http_400": {
+    "message": "OpenAI hylkäsi tiedoston (400). Se voi olla tuetusta poikkeava tai liian suuri."
+  },
+  "error_openai_http_401": {
+    "message": "API-avain hylättiin (401). Tarkista avain ja tallenna se uudelleen."
+  },
+  "error_openai_http_404": {
+    "message": "Tällä OpenAI-organisaatiolla ei ole oikeutta tarkistukseen (404)."
+  },
+  "error_openai_http_4xx": {
+    "message": "OpenAI hylkäsi pyynnön."
+  },
+  "error_openai_http_5xx": {
+    "message": "OpenAI ilmoitti palvelinvirheestä. Yritä myöhemmin uudelleen."
+  },
+  "error_openai_rate_limited": {
+    "message": "OpenAI:n käyttöraja tuli vastaan. Yritä myöhemmin uudelleen."
+  },
+  "error_openai_rate_limited_after": {
+    "message": "OpenAI:n käyttöraja tuli vastaan. Yritä uudelleen $1 sekunnin kuluttua."
+  },
+  "error_openai_network": {
+    "message": "Verkkovirhe. Tarkista yhteys."
+  },
+  "error_openai_bad_response": {
+    "message": "Odottamaton vastaus OpenAIlta."
+  },
+  "error_openai_unusable_reply": {
+    "message": "Laajennus ei saanut käyttökelpoista vastausta omalta taustatyöntekijältään. Lataa laajennus uudelleen."
   },
   "confirm_title": {
     "message": "Tarkistetaanko OpenAIlla?"
