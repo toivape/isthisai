@@ -6,7 +6,10 @@ import {
   mapReloadError,
   runOpenAiFlow,
   senderMatches,
+  serializeByImageHash,
   type OpenAiFlowDeps,
+  type OpenAiFlowOutcome,
+  type SerializeUploads,
 } from "../src/background/openaiFlow";
 import type { CheckErrorCode, CheckRecord, CheckResult, CheckUpdate, OpenAiErrorCode } from "../src/shared/types";
 import { minimalGif, minimalPng, minimalWebp } from "./helpers/images";
@@ -102,6 +105,8 @@ interface HarnessOptions {
   fetchImpl?: typeof fetch;
   /** Overrides the in-memory store (for storage-failure cases). */
   store?: CacheStore;
+  /** Overrides the per-hash upload lock (for concurrency cases). */
+  serialize?: SerializeUploads;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -137,6 +142,9 @@ function harness(options: HarnessOptions = {}) {
     readKey,
     requestConsent,
     readImage,
+    // A fresh lock per harness keeps the tests hermetic; the concurrency test
+    // shares one across two flows on purpose.
+    serialize: options.serialize ?? serializeByImageHash(),
     sendUpdate: (update) => {
       updates.push(update);
     },
@@ -534,5 +542,101 @@ describe("runOpenAiFlow: merge, cache and report", () => {
     const done = h.updates[0];
     if (done.status !== "done") throw new Error("expected a done update");
     expect(done.result).toEqual(completed);
+  });
+});
+
+describe("serializeByImageHash", () => {
+  test("runs one upload per hash and hands its outcome to a later caller", async () => {
+    const serialize = serializeByImageHash();
+    let started = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const run = async (): Promise<OpenAiFlowOutcome> => {
+      started += 1;
+      await gate;
+      return { kind: "ignored" };
+    };
+
+    const first = serialize("hash", run);
+    const second = serialize("hash", run);
+    expect(started).toBe(1);
+    release();
+    expect(await first).toEqual(await second);
+    expect(started).toBe(1);
+
+    // Once it has settled, a new caller starts a fresh run.
+    await expect(serialize("hash", run)).resolves.toEqual({ kind: "ignored" });
+    expect(started).toBe(2);
+  });
+
+  test("different hashes do not wait for each other", async () => {
+    const serialize = serializeByImageHash();
+    const started: string[] = [];
+    const run = (tag: string) => async (): Promise<OpenAiFlowOutcome> => {
+      started.push(tag);
+      return { kind: "ignored" };
+    };
+    await Promise.all([serialize("a", run("a")), serialize("b", run("b"))]);
+    expect(started).toEqual(["a", "b"]);
+  });
+});
+
+describe("runOpenAiFlow: one upload per image", () => {
+  test("two checks of the same image upload once, and each caller gets a done update", async () => {
+    // Two checkIds, one image: both flows read not_checked and both are approved.
+    // The per-hash lock has to make the second one reuse the first's outcome.
+    const f = await fixture(minimalPng(), "image/png");
+    const data = new Map<string, unknown>([
+      [`check:${f.record.checkId}`, f.record],
+      ["check:c2", { ...f.record, checkId: "c2" }],
+      [`result:${f.imageHash}`, f.stored],
+    ]);
+    const store: CacheStore = {
+      get: async (key) => data.get(key),
+      set: async (key, value) => {
+        data.set(key, value);
+      },
+    };
+
+    let releaseUpload!: () => void;
+    const uploadGate = new Promise<void>((resolve) => {
+      releaseUpload = resolve;
+    });
+    let uploads = 0;
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      if (init.method !== "POST") throw new Error("no conversion expected");
+      uploads += 1;
+      await uploadGate;
+      return provenanceResponse({}, { outcome: "detected" });
+    }) as unknown as typeof fetch;
+
+    const serialize = serializeByImageHash();
+    const updates: Array<{ checkId: string; update: CheckUpdate }> = [];
+    const depsFor = (checkId: string): OpenAiFlowDeps => ({
+      store,
+      readKey: async () => KEY,
+      requestConsent: async () => true,
+      readImage: async () => f.collected,
+      serialize,
+      sendUpdate: (update) => {
+        updates.push({ checkId, update });
+      },
+      fetchImpl,
+    });
+
+    const first = runOpenAiFlow(depsFor(f.record.checkId), { checkId: f.record.checkId, sender: SENDER });
+    const second = runOpenAiFlow(depsFor("c2"), { checkId: "c2", sender: SENDER });
+    // Let both flows reach the lock; the first holds it on the gated upload.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseUpload();
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(uploads).toBe(1);
+    expect(a.kind).toBe("done");
+    expect(b).toEqual(a);
+    expect(updates.map((entry) => entry.checkId).sort()).toEqual(["c1", "c2"]);
+    expect(updates.every((entry) => entry.update.status === "done")).toBe(true);
   });
 });

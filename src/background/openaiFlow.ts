@@ -32,6 +32,31 @@ export interface ConsentRequest {
   path: string;
 }
 
+export type OpenAiFlowOutcome =
+  | { kind: "ignored" }
+  | { kind: "error"; error: OpenAiError }
+  | { kind: "done"; result: CheckResult };
+
+export type SerializeUploads = (imageHash: string, run: () => Promise<OpenAiFlowOutcome>) => Promise<OpenAiFlowOutcome>;
+
+/**
+ * One upload at a time per image hash: a caller that arrives while one is in
+ * flight awaits its outcome instead of sending the same image again (PLAN §4
+ * Cache: the same image is never uploaded twice in a session). Two checks of one
+ * image have different checkIds but the same hash, which is what makes the hash
+ * the key.
+ */
+export function serializeByImageHash(): SerializeUploads {
+  const inFlight = new Map<string, Promise<OpenAiFlowOutcome>>();
+  return (imageHash, run) => {
+    const existing = inFlight.get(imageHash);
+    if (existing !== undefined) return existing;
+    const outcome = run().finally(() => inFlight.delete(imageHash));
+    inFlight.set(imageHash, outcome);
+    return outcome;
+  };
+}
+
 export interface OpenAiFlowDeps extends SendProvenanceDeps {
   store: CacheStore;
   readKey: () => Promise<string | undefined>;
@@ -40,12 +65,9 @@ export interface OpenAiFlowDeps extends SendProvenanceDeps {
   /** Re-obtains the stored image's bytes (network, or the page for blob:/data:). */
   readImage: (record: CheckRecord) => Promise<CollectedImage>;
   sendUpdate: (update: CheckUpdate) => void | Promise<void>;
+  /** Serializes the upload per image hash (see serializeByImageHash). */
+  serialize: SerializeUploads;
 }
-
-export type OpenAiFlowOutcome =
-  | { kind: "ignored" }
-  | { kind: "error"; error: OpenAiError }
-  | { kind: "done"; result: CheckResult };
 
 /** The request must come from the frame that opened the check (PLAN §4 step 8.1). */
 export function senderMatches(record: CheckRecord, sender: FlowSender): boolean {
@@ -144,14 +166,24 @@ export async function runOpenAiFlow(
   const confirmed = await deps.requestConsent({ checkId: record.checkId, path: consentWindowPath(record) });
   if (!confirmed) return { kind: "error", error: { code: "cancelled" } };
 
-  // The result may have been filled in while the window was open (another check
-  // of the same image, approved first). Re-read it so the same image is never
-  // uploaded twice in a session.
-  const afterConsent = await loadResult(deps.store, record.imageHash);
-  if (afterConsent !== undefined && afterConsent.openai.state === "done") {
-    await sendDone(deps, record, afterConsent);
-    return { kind: "done", result: afterConsent };
-  }
+  const outcome = await deps.serialize(record.imageHash, () => uploadOnce(deps, record, cached, key));
+  // The update is sent per caller, not per upload: a coalesced second check
+  // still gets its own done update in its own frame.
+  if (outcome.kind === "done") await sendDone(deps, record, outcome.result);
+  return outcome;
+}
+
+// Runs inside the per-hash guard. The cache is re-read here, so a check of the
+// same image that completed while this window was open is reused rather than
+// uploaded again.
+async function uploadOnce(
+  deps: OpenAiFlowDeps,
+  record: CheckRecord,
+  cached: CheckResult,
+  key: string,
+): Promise<OpenAiFlowOutcome> {
+  const latest = await loadResult(deps.store, record.imageHash);
+  if (latest !== undefined && latest.openai.state === "done") return { kind: "done", result: latest };
 
   const reloaded = await deps.readImage(record);
   if (reloaded.kind === "error") return { kind: "error", error: { code: mapReloadError(reloaded.error.code) } };
@@ -175,7 +207,7 @@ export async function runOpenAiFlow(
   const parsed = await sendProvenanceUpload(built.request, { fetchImpl: deps.fetchImpl, deadlineMs: deps.deadlineMs });
   if (!parsed.ok) return { kind: "error", error: parsed.error };
 
-  const merged = mergeOpenAi(cached, {
+  const merged = mergeOpenAi(latest ?? cached, {
     state: "done",
     serverConverted,
     c2pa: parsed.result.c2pa,
@@ -186,6 +218,5 @@ export async function runOpenAiFlow(
   } catch (error) {
     console.error("cache write failed", error);
   }
-  await sendDone(deps, record, merged);
   return { kind: "done", result: merged };
 }
