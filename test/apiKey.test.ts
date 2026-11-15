@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
-import { keyStatus, testKey, type TestKeyDeps } from "../src/background/apiKey";
+import { isOptionsPageSender, keyStatus, testKey, type TestKeyDeps } from "../src/background/apiKey";
 import { readC2pa } from "../src/background/c2pa";
 import { sniffMediaType } from "../src/background/sniff";
 import { scanXmp } from "../src/background/xmp";
@@ -52,6 +52,14 @@ describe("testKey", () => {
     const fetchImpl = vi.fn();
     const reply = await testKey(deps({ readKey: async () => undefined, fetchImpl }));
     expect(reply).toEqual({ ok: false, error: { code: "no_key" } });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  test("an empty stored key is no_key, not an unusable one", async () => {
+    // "" would otherwise reach buildRequest and come back as invalid_key, telling
+    // the user to re-save a key they never had.
+    const fetchImpl = vi.fn();
+    expect(await testKey(deps({ readKey: async () => "", fetchImpl }))).toEqual({ ok: false, error: { code: "no_key" } });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -136,5 +144,32 @@ describe("the bundled sample", () => {
     expect(sniffMediaType(SAMPLE)).toBe("image/png");
     expect(scanXmp(SAMPLE)).toEqual({ state: "not_detected" });
     expect(await readC2pa("image/png", SAMPLE, WASM_BYTES)).toEqual({ manifest: "absent", aiAction: false });
+  });
+});
+
+describe("isOptionsPageSender", () => {
+  const PREFIX = "chrome-extension://abc/src/options/";
+
+  test("accepts the extension's own options page, in a tab or not", () => {
+    // options_ui with open_in_tab: false is hosted inside the chrome://extensions
+    // tab, so a tab-bearing sender is still the real options page: the URL
+    // decides, not the tab (Chrome's MessageSender docs). Other sender fields are
+    // simply ignored.
+    const inTab = { url: `${PREFIX}options.html`, tab: { id: 1 } };
+    expect(isOptionsPageSender({ url: `${PREFIX}options.html` }, PREFIX)).toBe(true);
+    expect(isOptionsPageSender(inTab, PREFIX)).toBe(true);
+  });
+
+  test("refuses an injected content script, whose sender URL is the page's", () => {
+    // This is what stops a script in a page from spending the stored key on an
+    // upload nobody confirmed (PLAN §5, §6).
+    const contentScript = { url: "https://page.example/", tab: { id: 1 } };
+    expect(isOptionsPageSender(contentScript, PREFIX)).toBe(false);
+  });
+
+  test("refuses other extension pages, other extensions, and anything else", () => {
+    expect(isOptionsPageSender({ url: "chrome-extension://abc/src/confirm/confirm.html" }, PREFIX)).toBe(false);
+    expect(isOptionsPageSender({ url: "chrome-extension://other/src/options/options.html" }, PREFIX)).toBe(false);
+    expect(isOptionsPageSender({}, PREFIX)).toBe(false);
   });
 });

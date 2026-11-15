@@ -6,7 +6,7 @@
 import type { CheckError, CheckUpdate, DismissPopup, KeyStatusReply, ReadBlobReply, TestKeyReply } from "../shared/types";
 import { resultWindowPath } from "../shared/errors";
 import { isKeyStatus, isTestKey } from "../shared/types";
-import { keyStatus, testKey } from "./apiKey";
+import { isOptionsPageSender, keyStatus, testKey } from "./apiKey";
 import { sessionStore } from "./cache";
 import { runCheckSteps } from "./check";
 import { readC2pa } from "./c2pa";
@@ -183,8 +183,15 @@ async function loadSample(): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-// Returning true keeps the message channel open for the async reply.
-chrome.runtime.onMessage.addListener((incoming: unknown, _sender, sendResponse: (reply: KeyStatusReply | TestKeyReply) => void) => {
+// Returning true keeps the message channel open for the async reply. Key
+// management is answered only for the extension's own options page: an injected
+// content script must not be able to test or read about the key, and must not be
+// able to make the worker upload anything (PLAN §5, §6).
+const OPTIONS_URL_PREFIX = chrome.runtime.getURL("src/options/");
+
+chrome.runtime.onMessage.addListener((incoming: unknown, sender, sendResponse: (reply: KeyStatusReply | TestKeyReply) => void) => {
+  if (!isKeyStatus(incoming) && !isTestKey(incoming)) return undefined;
+  if (!isOptionsPageSender(sender, OPTIONS_URL_PREFIX)) return undefined;
   if (isKeyStatus(incoming)) {
     void keyStatus({ readKey: readStoredKey }).then(sendResponse, console.error);
     return true;

@@ -13,6 +13,17 @@ export interface ApiKeySource {
   readKey(): Promise<string | undefined>;
 }
 
+// Only the extension's own options page may ask about or spend the key. The URL
+// is the discriminator, not the presence of a tab: an injected content script
+// reports the *page's* URL, which can never be chrome-extension://<ours>/…, while
+// the options page reports its own URL even when Chrome hosts it in a tab (the
+// embedded options_ui case). Requiring "no tab" would therefore reject the real
+// options page — Chrome's MessageSender docs say tab is set for any connection
+// opened from a tab.
+export function isOptionsPageSender(sender: { url?: string | undefined }, optionsUrlPrefix: string): boolean {
+  return typeof sender.url === "string" && sender.url.startsWith(optionsUrlPrefix);
+}
+
 export async function keyStatus(source: ApiKeySource): Promise<KeyStatusReply> {
   const key = await source.readKey();
   return { hasKey: typeof key === "string" && key !== "" };
