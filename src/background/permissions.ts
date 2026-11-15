@@ -6,15 +6,23 @@
 // request is needed only when the image origin differs from the tab's
 // main-frame origin and <all_urls> is not already granted.
 
-/** "https://host/" -> "https://host/*" (a chrome.permissions origin pattern). */
-export function urlOriginPattern(url: string): string | undefined {
+/** The url's http(s) origin, or undefined. A data: or blob: URL has an opaque
+ * origin (`new URL(...).origin` is the string "null"), and relative or garbage
+ * URLs throw; none of those should ever be rendered as a source. */
+export function httpOrigin(url: string): string | undefined {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
-    return `${parsed.origin}/*`;
+    return parsed.origin;
   } catch {
     return undefined;
   }
+}
+
+/** "https://host" -> "https://host/*" (a chrome.permissions origin pattern). */
+export function urlOriginPattern(url: string): string | undefined {
+  const origin = httpOrigin(url);
+  return origin === undefined ? undefined : `${origin}/*`;
 }
 
 /**

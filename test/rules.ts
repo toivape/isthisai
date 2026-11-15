@@ -9,7 +9,8 @@ export type PerFileRuleId =
   | "api-key-placement"
   | "locale-forbidden-words"
   | "manifest-clean"
-  | "no-dynamic-import";
+  | "no-dynamic-import"
+  | "no-ask-again";
 
 export type RuleId = PerFileRuleId | "locale-parity";
 
@@ -228,8 +229,15 @@ const manifestClean: Rule = (path, content) => {
   return violations;
 };
 
-export const RULES: Record<PerFileRuleId, Rule> = {
-  "no-reencode": noReencode,
+// Hard rule 5: the OpenAI upload is confirmed before every upload, with no
+// "don't ask again". The confirmation window is the only place a control like
+// that could be added, so that page is where the rule looks.
+const noAskAgain: Rule = (path, content) =>
+  path.startsWith("src/confirm/")
+    ? matches(path, content, "no-ask-again", /don'?t\s+ask\s+again|ask\s+again|remember\s+(this\s+)?choice/i, "a 'don't ask again' control is forbidden (hard rule 5)")
+    : [];
+
+export const RULES: Record<PerFileRuleId, Rule> = {  "no-reencode": noReencode,
   "no-content-type": noContentType,
   "no-image-jpg": noImageJpg,
   "c2pa-wasm-gated": c2paWasmGated,
@@ -237,6 +245,7 @@ export const RULES: Record<PerFileRuleId, Rule> = {
   "locale-forbidden-words": localeForbiddenWords,
   "manifest-clean": manifestClean,
   "no-dynamic-import": noDynamicImport,
+  "no-ask-again": noAskAgain,
 };
 
 export function ruleViolations(files: RepoFile[]): Violation[] {

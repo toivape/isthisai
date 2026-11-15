@@ -129,6 +129,19 @@ const CASES: {
     ],
   },
   {
+    rule: "no-ask-again",
+    bad: [
+      { path: "src/confirm/confirm.html", content: '<label><input type="checkbox" /> Don\'t ask again</label>\n' },
+      { path: "src/confirm/confirm.ts", content: 'const label = "remember choice";\n' },
+    ],
+    clean: [
+      { path: "src/confirm/confirm.html", content: "<button>Upload</button>\n" },
+      // Only the confirmation window is the subject: the same words elsewhere
+      // (a test name, a comment in another module) are not a control.
+      { path: "src/background/check.ts", content: "// no ask again control here\n" },
+    ],
+  },
+  {
     rule: "no-dynamic-import",
     bad: [
       { path: "src/background/index.ts", content: 'const { read } = await import("./c2pa");\n' },

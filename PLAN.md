@@ -386,7 +386,7 @@ An AI signal **with** a caveat (TÄ, but the popup must qualify it):
 
 **Unit tests (Vitest):** magic-byte sniffing, XMP scanning in every container, C2PA mapping (runs `@contentauth/c2pa-wasm` in Node against the fixtures; asserts that `fetch` is never called, including for the remote-reference PNG), verdict (every row of the TÄ rule and the not-an-AI-signal cases), OpenAI request building, response parsing and error mapping, streaming size limit, cache rules, OpenAI flow decisions (expired check, sender mismatch, hash mismatch, server conversion, cancel).
 
-**Rules test:** `test/rules.test.ts` scans `src/`, `_locales/` and `manifest.json` for broken hard rules (re-encoding APIs, hand-set `Content-Type`, `image/jpg`, c2pa-wasm without remote fetches disabled, `apiKey` outside the worker and options page or in a log call, forbidden result words, differing locale keys, dynamic `import()` in the service worker, `content_scripts`/`externally_connectable`). Each rule is a pure function with a test that feeds it a known-bad snippet, so a rule that silently matches nothing is caught.
+**Rules test:** `test/rules.test.ts` scans `src/`, `_locales/` and `manifest.json` for broken hard rules (re-encoding APIs, hand-set `Content-Type`, `image/jpg`, c2pa-wasm without remote fetches disabled, `apiKey` outside the worker and options page or in a log call, forbidden result words, differing locale keys, dynamic `import()` in the service worker, `content_scripts`/`externally_connectable`, a "don't ask again" control in the confirmation window). Each rule is a pure function with a test that feeds it a known-bad snippet, so a rule that silently matches nothing is caught.
 
 **CI:** GitHub Actions runs `npm ci`, `typecheck`, `test` and `build` on every pull request and on pushes to `main`.
 
@@ -424,6 +424,7 @@ An AI signal **with** a caveat (TÄ, but the popup must qualify it):
 19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
 26. M3 (#16): with the extension loaded, check the same image twice in one browser session and confirm the session cache is populated (`chrome.storage.session` in the worker DevTools) and cleared after a browser restart; entries must never contain image bytes.
 27. M3 (#20): check the same image twice in a session: both checks finish and the second is served from `chrome.storage.session` (`result:<hash>` present in the worker DevTools); an image whose only AI signal is XMP `DigitalSourceType` shows TÄ (`test/fixtures/ai-meta-bunny.jpg` is such a file: no C2PA at all, loose XMP under the Exiv2 prefix `iptcExt:`). The second check still downloads the bytes (the SHA-256 key needs them); the cache skips the local C2PA/XMP work, which has no log line of its own.
+28. M4 (#18): open `chrome-extension://<extension id>/src/confirm/confirm.html?view=confirm&checkId=c1&origin=https%3A%2F%2Fexample.com&mediaType=image%2Fjpeg&sizeBytes=459248` in a tab. Expect: the origin, type and size lines render ("448.5 KiB"), the body says checks are currently free with strict rate limits and no longer mentions billing, the page console shows no errors, and dropping `origin` hides that line instead of showing "Image from: ". Cancel and closing the tab both decline; that they reach the worker cannot be seen until #11 wires the handler.
 
 ---
 
