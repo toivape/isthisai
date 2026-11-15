@@ -33,13 +33,14 @@ Work through the milestones in order. Each has acceptance criteria; do not start
 - EU AI Act Article 50 has applied since 2 Aug 2026. Providers must mark AI output with signed metadata plus an imperceptible watermark, and must offer a detection mechanism. A watermark-detection interoperability solution is due 2 Feb 2027, so there is no universal detector yet.
 - **OpenAI Content Provenance API** (docs: https://developers.openai.com/api/docs/guides/content-provenance):
   - `POST https://api.openai.com/v1/content_provenance_checks`, header `Authorization: Bearer <key>`, multipart field `file`, one file per request.
-  - Images: PNG, JPEG, WebP only. Max 50 MiB.
+  - Images: PNG, JPEG, WebP and GIF. Max 50 MiB. The docs do not say whether animated GIFs are supported.
   - Do **not** set the `Content-Type` header manually. Let `fetch` + `FormData` set the multipart boundary. Set the file part's real media type (`image/jpeg`, not `image/jpg`).
   - Response has `results[]` with a `c2pa` entry and a `synthid` entry (images). There is no top-level verdict. Each has `outcome: "detected" | "not_detected"`. Missing details are `null`.
   - C2PA entry also has `validation_state` (`trusted | valid | invalid | not_present`), `issuer`, `model`, `generated_at`.
   - It only detects **OpenAI** signals. `not_detected` proves nothing.
   - Errors: 400 bad/unsupported file, 401 bad key, 404 org without access, 429 rate limit (honour `Retry-After`).
-  - Rate limits are described as strict (no numbers published). **Pricing is not stated in the guide: check https://developers.openai.com/api/docs/pricing and tell users the check may be billed.**
+  - **A real 429, observed 2026-11-14 with the owner's key:** status 429, `error.code: "rate_limit_exceeded"`, and **no `Retry-After` header and no `x-ratelimit-*` headers at all**. The only retry information is the body message ("please slow down and try again after 2230.714 seconds"). The limits are genuinely strict: roughly 20 requests in about 30 minutes exhausted them. So the UI shows a retry time only when a `Retry-After` header happens to be present, and a generic "try again later" otherwise — it does not scrape the prose message (PLAN §5).
+  - Rate limits are described as strict (no numbers published). **Checks are currently free and subject to those limits** (OpenAI Help Center, "Provenance signals in OpenAI-generated content", checked 2026-11-14); the API pricing page lists no Content Provenance entry. The confirmation and test-key text therefore warn about rate limits, not billing. No number is published, so none is quoted.
   - Real responses for both fixtures are in `test/fixtures/openai-*.json`.
 - Re-encoding the image (for example drawing it on a canvas) destroys both metadata and watermark. **Always send/inspect the original bytes.**
 - C2PA metadata is often stripped by CDNs, screenshots and re-saves. SynthID lives in the pixels and survives more edits. Either signal is enough to show TÄ.
@@ -221,7 +222,7 @@ Triggered only by a context-menu click. Input: `info.srcUrl`, `info.frameUrl`, `
    1. Content script sends `openaiRequest {checkId}`. The worker loads `check:<checkId>` and checks that `sender.tab.id` and `sender.frameId` match. Missing record (browser restarted, extension reloaded): `check_expired` ("check the image again").
    2. The worker opens the confirmation window. Nothing is uploaded unless the user clicks Upload there.
    3. The worker fetches the stored `srcUrl` again (or asks for the blob again), under the same 25 s deadline as step 3 and checks the SHA-256 against the record (`hash_mismatch` otherwise; no upload).
-   4. If the bytes are AVIF, HEIC or GIF (not accepted by OpenAI), the worker fetches again with `Accept: image/webp,image/png,image/jpeg`. If the server returns an accepted type, that version is uploaded and the result is marked `serverConverted: true` (the popup says the server may have re-encoded the image, which can remove signals). If not: `unsupported_type`. The hash check does not apply to this second fetch.
+   4. If the bytes are AVIF or HEIC (not accepted by OpenAI; GIF is accepted as `image/gif`), the worker fetches again with `Accept: image/webp,image/png,image/jpeg`. If the server returns an accepted type, that version is uploaded and the result is marked `serverConverted: true` (the popup says the server may have re-encoded the image, which can remove signals). If not: `unsupported_type`. The hash check does not apply to this second fetch.
    5. Upload the bytes with the sniffed media type (section 2), with a 25 s deadline for the whole request (`timeout`); a slower upload would lose the worker (section 2). Parse the response, merge into the cached result, send `checkUpdate {status: "done"}`. OpenAI errors are shown but never cached.
 9. **Interrupted checks.** If the content script gets no `done`/`failed` within 60 s of `checking` (worker stopped), it shows "Check interrupted, try again".
 
@@ -256,7 +257,8 @@ type CheckError = { code: "permission_denied" | "fetch_failed" | "timeout" | "to
 
 type OpenAiError = {
   code: "no_key" | "cancelled" | "check_expired" | "hash_mismatch" | "unsupported_type" | "fetch_failed" | "timeout"
-      | "http_400" | "http_401" | "http_404" | "http_4xx" | "http_5xx" | "rate_limited" | "network" | "bad_response";
+      | "http_400" | "http_401" | "http_404" | "http_4xx" | "http_5xx" | "rate_limited" | "network" | "bad_response"
+      | "invalid_key"; // the stored key cannot be sent as a header value (fetch would throw before sending)
   retryAfterSec?: number;
 };
 ```
@@ -294,7 +296,7 @@ Not an AI signal (show details in the popup, no TÄ):
 - AI signal found: **TÄ** badge over the image corner (tooltip "Tekoäly" / "AI signal found (tekoäly)"); clicking it opens the popup.
 - No signal: no badge. A brief toast "No AI signal found. This does not prove the image is human-made." and the popup.
 - Check incomplete: no badge; popup explains which check could not finish.
-- Error: toast with a short message and retry hint (retry time for 429).
+- Error: toast with a short message. For 429, show the retry time when the response carried a `Retry-After` header; when it did not (the observed case), say "try again later" rather than inventing a number or parsing the sentence in the body (section 2).
 
 **Popup content** (Shadow DOM, closes on Esc / outside click)
 - Headline: "AI signal found", "No AI signal found" or "Check incomplete".
@@ -318,10 +320,11 @@ Not an AI signal (show details in the popup, no TÄ):
 ## 6. API key, privacy and safety
 
 - Options page field for the OpenAI API key (password-type input). **Write-only:** it shows "key saved" / "no key" (from the worker's `keyStatus`) and a clear button; it never reads the key back.
-- "Test key" button: the worker uploads the bundled tiny sample (`src/assets/sample.png`, no provenance) and reports success/401/404/429. The button text says it sends a sample image to OpenAI and may be billed; clicking it is the confirmation (it is not the user's image).
+- "Test key" button: the worker uploads the bundled tiny sample (`src/assets/sample.png`, no provenance) and reports success/401/404/429. The button text says it sends a sample image to OpenAI, that checks are currently free but strict rate limits apply, and that it sends the sample rather than the user's image; clicking it is the confirmation.
 - Store in `chrome.storage.local` with access level `TRUSTED_CONTEXTS` (not `sync`). Read only in the service worker. Never log it, never put it in URLs, never send it to content scripts.
 - Advise users in the options text to create a **dedicated project key with a spend limit** in the OpenAI dashboard.
-- **Confirmation in the extension window before every OpenAI upload:** "This image will be sent to OpenAI to check for provenance signals. Checks may be billed to your OpenAI account." No "don't ask again".
+- **Confirmation in the extension window before every OpenAI upload:** "This image will be sent to OpenAI to check for provenance signals. Checks are currently free but subject to strict rate limits." No "don't ask again".
+- Uploaded content is "not stored unless legally required and is not used to train OpenAI models" (OpenAI Help Center, checked 2026-11-14). Used verbatim in the options privacy text.
 - The extension makes no network requests other than: fetching the image the user chose, and the OpenAI call the user confirmed. c2pa-wasm remote fetches are always disabled.
 - Privacy section in the options page and README, stating exactly this.
 - Handle `data:`/`blob:` and cross-origin fetch failures gracefully (explain that the site blocked the download).
@@ -367,7 +370,7 @@ Not an AI signal (show details in the popup, no TÄ):
 6. Restricted page (for example the Web Store): result appears in the extension window.
 7. Brave Shields on and off: note any difference in image fetching.
 8. Dark mode and light mode pages: popup and badge stay readable.
-9. No key set: OpenAI button disabled with an explanation. Wrong key: clear 401 message. Rate limit: shows retry time.
+9. No key set: OpenAI button disabled with an explanation. Wrong key: clear 401 message. Rate limit: shows the retry time when a `Retry-After` header was sent, otherwise a plain "try again later".
 10. OpenAI upload always opens the confirmation window; Cancel uploads nothing.
 11. AVIF image from a CDN: OpenAI check uses the server-converted version and the popup says so.
 12. Halloween re-saved JPEG: local checks find nothing; the OpenAI check finds SynthID and shows TÄ.
@@ -441,7 +444,7 @@ Not an AI signal (show details in the popup, no TÄ):
 ## 10. Open questions to resolve during implementation
 
 1. ~~M0 spike results (section 9, M0).~~ **Done 2026-11-09:** results in section 2 ("Measured in Brave"); `blob:`/`data:` images were not measured.
-2. Exact pricing and default rate limits of the Content Provenance API (check the OpenAI pricing page; not stated in the guide). Update the confirmation and test-key text accordingly.
+2. ~~Exact pricing and default rate limits of the Content Provenance API.~~ **Resolved 2026-11-14:** checks are free and subject to strict (unpublished) rate limits; the pricing page has no entry for the endpoint. The confirmation and test-key text warn about rate limits, not billing (section 2, section 6).
 3. Does the OpenAI SynthID check also detect Google/other partner watermarks via this API? The docs only promise "supported OpenAI signals", so assume no and say so in the UI.
 4. Final Finnish label from the EU Code of Practice icon annex.
 5. Whether to bundle a C2PA trust list in a later version, so local results can show `trusted` and the issuer is verified.

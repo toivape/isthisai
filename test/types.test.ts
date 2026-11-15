@@ -218,7 +218,7 @@ const guardCases: GuardCase[] = [
       ...[
         "no_key", "cancelled", "check_expired", "hash_mismatch", "unsupported_type", "fetch_failed",
         "timeout", "http_400", "http_401", "http_404", "http_4xx", "http_5xx", "rate_limited", "network",
-        "bad_response",
+        "bad_response", "invalid_key",
       ].map((code) => ({ code })),
       { code: "rate_limited", retryAfterSec: 30 },
       { code: "rate_limited", retryAfterSec: 0 },

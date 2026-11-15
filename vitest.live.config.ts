@@ -7,5 +7,7 @@ export default defineConfig({
   test: {
     include: ["test/live/*.live.ts"],
     env: { ISTHISAI_LIVE: "1" },
+    // Must exceed FETCH_DEADLINE_MS so the client's deadline decides, not vitest's.
+    testTimeout: 30_000,
   },
 });

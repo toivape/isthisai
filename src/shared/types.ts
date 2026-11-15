@@ -60,7 +60,8 @@ export type OpenAiErrorCode =
   | "http_5xx"
   | "rate_limited"
   | "network"
-  | "bad_response";
+  | "bad_response"
+  | "invalid_key";
 
 export interface OpenAiError {
   code: OpenAiErrorCode;
@@ -192,7 +193,7 @@ export function isCheckError(value: unknown): value is CheckError {
 
 export function isOpenAiError(value: unknown): value is OpenAiError {
   if (!isObject(value)) return false;
-  if (!isOneOf(value.code, ["no_key", "cancelled", "check_expired", "hash_mismatch", "unsupported_type", "fetch_failed", "timeout", "http_400", "http_401", "http_404", "http_4xx", "http_5xx", "rate_limited", "network", "bad_response"])) return false;
+  if (!isOneOf(value.code, ["no_key", "cancelled", "check_expired", "hash_mismatch", "unsupported_type", "fetch_failed", "timeout", "http_400", "http_401", "http_404", "http_4xx", "http_5xx", "rate_limited", "network", "bad_response", "invalid_key"])) return false;
   if (value.retryAfterSec !== undefined && typeof value.retryAfterSec !== "number") return false;
   return true;
 }
