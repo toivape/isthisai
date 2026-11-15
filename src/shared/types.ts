@@ -16,6 +16,12 @@ export type OpenAiResultPart =
 export interface LocalC2pa {
   manifest: "absent" | "present" | "invalid" | "remote_unfetched" | "error";
   aiAction: boolean;
+  // Whether the claim signature validated, the signer was inside its validity
+  // window, the image bytes matched the hard binding, and every failure was about
+  // the signer rather than the content. Present only when a
+  // manifest was found and evaluated: there is nothing to assess otherwise, and
+  // "invalid" alone cannot tell a rejected signer from a tampered image.
+  integrity?: "verified" | "unverified";
   claimedIssuer?: string;
   claimedModel?: string;
   generatedAt?: string;
@@ -150,6 +156,7 @@ export function isCheckResult(value: unknown): value is CheckResult {
   if (!isObject(c2pa)) return false;
   if (!isOneOf(c2pa.manifest, ["absent", "present", "invalid", "remote_unfetched", "error"])) return false;
   if (typeof c2pa.aiAction !== "boolean") return false;
+  if (c2pa.integrity !== undefined && !isOneOf(c2pa.integrity, ["verified", "unverified"])) return false;
   if (c2pa.claimedIssuer !== undefined && !isString(c2pa.claimedIssuer)) return false;
   if (c2pa.claimedModel !== undefined && !isString(c2pa.claimedModel)) return false;
   if (c2pa.generatedAt !== undefined && !isString(c2pa.generatedAt)) return false;

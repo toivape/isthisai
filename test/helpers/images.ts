@@ -153,3 +153,48 @@ export function minimalWebp(): Uint8Array {
     chunk,
   ]);
 }
+
+// Flips the low bit of the last character of the first occurrence of `text`
+// ("ChatGPT" -> "ChatGPU"), in any container. Pointed at the softwareAgent name
+// inside a c2pa.actions assertion, it leaves the image data and the claim
+// untouched: the claim signature and the data hash still verify, but the
+// assertion no longer matches the hash the claim records for it.
+export function tamperText(bytes: Uint8Array, text: string): Uint8Array {
+  const needle = new TextEncoder().encode(text);
+  const copy = bytes.slice();
+  for (let at = 0; at <= copy.length - needle.length; at++) {
+    if (needle.every((byte, i) => copy[at + i] === byte)) {
+      copy[at + needle.length - 1] ^= 0x01;
+      return copy;
+    }
+  }
+  throw new Error(`text not found to alter: ${text}`);
+}
+
+// Flips one byte of a JPEG's entropy-coded scan data, 64 bytes before the EOI
+// marker, leaving the APP11 manifest untouched (assertion.dataHash.mismatch).
+export function tamperJpegScan(bytes: Uint8Array): Uint8Array {
+  const at = bytes.length - 64;
+  if (bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) throw new Error("JPEG does not end in EOI");
+  if (bytes[at] >= 0xfe) throw new Error("flip would create a JPEG marker byte");
+  const copy = bytes.slice();
+  copy[at] ^= 0x01;
+  return copy;
+}
+
+// Flips one byte inside a PNG's first IDAT payload, leaving the C2PA caBX chunk
+// untouched: the manifest still parses and still claims an AI action, but the
+// image no longer matches its hard binding (assertion.dataHash.mismatch). The
+// tampered copy is built here rather than committed, since it differs from a
+// real fixture by a single byte.
+export function tamperPngDataHash(bytes: Uint8Array): Uint8Array {
+  const copy = bytes.slice();
+  for (let at = 8; at <= copy.length - 8; at++) {
+    if (copy[at] === 0x49 && copy[at + 1] === 0x44 && copy[at + 2] === 0x41 && copy[at + 3] === 0x54) {
+      const flipAt = at + 4 + 64; // well inside the payload, past the zlib header
+      copy[flipAt] = copy[flipAt] ^ 0xff;
+      return copy;
+    }
+  }
+  throw new Error("no IDAT chunk found");
+}

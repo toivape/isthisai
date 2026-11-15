@@ -117,6 +117,81 @@ function creatingActionOf(manifest: Record<string, unknown>): ActionLike | undef
   return actionsOf(manifest).find((action) => action.action === "c2pa.created");
 }
 
+// A tampered image *withholds* the binding match code rather than reporting a new
+// one, so the match code is required as positive evidence. BMFF containers
+// (AVIF/HEIC) bind through bmffHash, not dataHash, hence the list.
+const SIGNATURE_CODES = ["claimSignature.validated", "claimSignature.insideValidity"];
+const BINDING_MATCH_CODES = [
+  "assertion.dataHash.match",
+  "assertion.bmffHash.match",
+  "assertion.boxesHash.match",
+  "assertion.collectionHash.match",
+];
+// Failures about the signer, not the content. Every other failure, including
+// codes a future c2pa-wasm adds, makes integrity unverified.
+const TOLERATED_INTEGRITY_FAILURES = new Set(["signingCredential.untrusted"]);
+
+// Every certificate-profile message c2pa-rs 0.91.7 can emit when the signer's EKU
+// is not one the C2PA profile accepts (crypto/cose/certificate_profile.rs). Only
+// the EKU case is tolerated: the certificate is for another purpose, which says
+// nothing about whether the content matches the claim. A certificate rejected for
+// anything else (self-signed, expired, weak key) is listed nowhere here, so it
+// fails closed. A c2pa-wasm bump that rewords one of these also fails closed
+// rather than open.
+const EKU_PROFILE_EXPLANATIONS = new Set([
+  "certificate missing required EKU",
+  "certificate missing digitalSignature EKU",
+  "certificate missing mandatory EKU",
+  "certificate 'any' EKU not allowed",
+  "certificate invalid set of EKUs",
+  "the certificate contains an invalid extended key usage (EKU) value",
+]);
+
+// c2pa-rs reports claim.malformed for a vendor assertion it cannot decode, which
+// is a broader use of the code than "the claim cbor is invalid". Only a failure
+// scoped to an assertion may be tolerated; one naming the claim itself may not.
+function isAssertionScoped(entry: Record<string, unknown>): boolean {
+  return typeof entry.url === "string" && entry.url.includes("/c2pa.assertions/");
+}
+
+function statusCodesOf(entries: unknown[]): unknown[] {
+  return entries.map((entry) => (isObject(entry) ? entry.code : undefined));
+}
+
+function isToleratedIntegrityFailure(entry: unknown): boolean {
+  if (!isObject(entry) || typeof entry.code !== "string") return false;
+  const code = entry.code;
+  if (code === "signingCredential.invalid") {
+    return typeof entry.explanation === "string" && EKU_PROFILE_EXPLANATIONS.has(entry.explanation);
+  }
+  if (code === "claim.malformed") return isAssertionScoped(entry);
+  return TOLERATED_INTEGRITY_FAILURES.has(code) || TOLERATED_FAILURE_PREFIXES.some((prefix) => code.startsWith(prefix));
+}
+
+function failuresOf(statusCodes: Record<string, unknown>): unknown[] {
+  return Array.isArray(statusCodes.failure) ? statusCodes.failure : [];
+}
+
+// c2pa-rs makes the whole store invalid for a non-tolerated failure in any
+// ingredient delta, so the allowlist has to cover that axis as well.
+function ingredientDeltaFailures(results: Record<string, unknown>): unknown[] {
+  const deltas = Array.isArray(results.ingredientDeltas) ? results.ingredientDeltas : [];
+  return deltas.flatMap((delta) =>
+    isObject(delta) && isObject(delta.validationDeltas) ? failuresOf(delta.validationDeltas) : [],
+  );
+}
+
+function integrityOf(validationResults: unknown): "verified" | "unverified" {
+  const results = isObject(validationResults) ? validationResults : {};
+  const active = isObject(results.activeManifest) ? results.activeManifest : {};
+  const success = Array.isArray(active.success) ? active.success : [];
+  const failures = [...failuresOf(active), ...ingredientDeltaFailures(results)];
+  const successCodes = new Set(statusCodesOf(success));
+  const signatureValidated = SIGNATURE_CODES.every((code) => successCodes.has(code));
+  const bindingMatched = BINDING_MATCH_CODES.some((code) => successCodes.has(code));
+  return signatureValidated && bindingMatched && failures.every(isToleratedIntegrityFailure) ? "verified" : "unverified";
+}
+
 export function mapC2paStore(store: unknown): LocalC2pa {
   if (!isObject(store)) return { manifest: "error", aiAction: false };
   const activeLabel = store.active_manifest;
@@ -136,6 +211,9 @@ export function mapC2paStore(store: unknown): LocalC2pa {
   const result: LocalC2pa = {
     manifest,
     aiAction: hasAiAction(manifests, activeLabel, new Set()),
+    // Both states above are the only ones that reach here, which is what keeps
+    // the field off a manifest that was never found.
+    integrity: integrityOf(store.validation_results),
   };
   if (typeof signatureInfo.issuer === "string") result.claimedIssuer = signatureInfo.issuer;
   if (creating) {
