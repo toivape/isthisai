@@ -216,6 +216,28 @@ describe("rememberDataUrl", () => {
     expect(map.get("c1")).toBe("data:image/png;base64,AAAA");
   });
 
+  test("a longer URL replaces a shorter one, an equal-length one does not, and a refresh moves the check to newest", () => {
+    const map = new Map<string, string>();
+    rememberDataUrl(map, "a", "data:image/png;base64,");
+    rememberDataUrl(map, "b", "data:image/png;base64,BBBB");
+    rememberDataUrl(map, "a", "data:image/png;base64,AAAA");
+    expect(map.get("a")).toBe("data:image/png;base64,AAAA");
+    expect([...map.keys()]).toEqual(["b", "a"]);
+    rememberDataUrl(map, "a", "data:image/png;base64,CCCC");
+    expect(map.get("a")).toBe("data:image/png;base64,AAAA");
+  });
+
+  test("exactly the cap is kept, in one URL or across several", () => {
+    const one = new Map<string, string>();
+    rememberDataUrl(one, "a", dataUrl(MAX_REMEMBERED_DATA_CHARS));
+    expect(one.has("a")).toBe(true);
+
+    const two = new Map<string, string>();
+    rememberDataUrl(two, "a", dataUrl(MAX_REMEMBERED_DATA_CHARS / 2));
+    rememberDataUrl(two, "b", dataUrl(MAX_REMEMBERED_DATA_CHARS / 2));
+    expect([...two.keys()]).toEqual(["a", "b"]);
+  });
+
   test("a non-data: URL forgets the check", () => {
     const map = new Map([["c1", "data:image/png;base64,AAAA"]]);
     rememberDataUrl(map, "c1", "https://cdn.example/a.png");
