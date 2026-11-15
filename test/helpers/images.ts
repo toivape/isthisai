@@ -154,20 +154,32 @@ export function minimalWebp(): Uint8Array {
   ]);
 }
 
-// Flips one byte inside the PNG's embedded c2pa.actions assertion (the
-// softwareAgent name), leaving the image data and the claim untouched: the claim
-// signature and the data hash still verify, but the assertion no longer matches
-// the hash the claim records for it. The opposite tamper to tamperPngDataHash.
-export function tamperPngAssertion(bytes: Uint8Array): Uint8Array {
-  const needle = new TextEncoder().encode("ChatGPT");
+// Flips the low bit of the last character of the first occurrence of `text`
+// ("ChatGPT" -> "ChatGPU"), in any container. Pointed at the softwareAgent name
+// inside a c2pa.actions assertion, it leaves the image data and the claim
+// untouched: the claim signature and the data hash still verify, but the
+// assertion no longer matches the hash the claim records for it.
+export function tamperText(bytes: Uint8Array, text: string): Uint8Array {
+  const needle = new TextEncoder().encode(text);
   const copy = bytes.slice();
   for (let at = 0; at <= copy.length - needle.length; at++) {
     if (needle.every((byte, i) => copy[at + i] === byte)) {
-      copy[at + needle.length - 1] = 0x75; // "ChatGPt" -> "ChatGPu"
+      copy[at + needle.length - 1] ^= 0x01;
       return copy;
     }
   }
-  throw new Error("no c2pa.actions softwareAgent name found to alter");
+  throw new Error(`text not found to alter: ${text}`);
+}
+
+// Flips one byte of a JPEG's entropy-coded scan data, 64 bytes before the EOI
+// marker, leaving the APP11 manifest untouched (assertion.dataHash.mismatch).
+export function tamperJpegScan(bytes: Uint8Array): Uint8Array {
+  const at = bytes.length - 64;
+  if (bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) throw new Error("JPEG does not end in EOI");
+  if (bytes[at] >= 0xfe) throw new Error("flip would create a JPEG marker byte");
+  const copy = bytes.slice();
+  copy[at] ^= 0x01;
+  return copy;
 }
 
 // Flips one byte inside a PNG's first IDAT payload, leaving the C2PA caBX chunk

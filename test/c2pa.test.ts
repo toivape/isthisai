@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import init, { WasmReader } from "@contentauth/c2pa-wasm";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type MockInstance } from "vitest";
 import { readC2pa, mapC2paError, mapC2paStore } from "../src/background/c2pa";
 import type { LocalC2pa } from "../src/shared/types";
-import { minimalGif, minimalWebp, pngWithXmpProvenance, tamperPngAssertion, tamperPngDataHash } from "./helpers/images";
+import { minimalGif, minimalWebp, pngWithXmpProvenance, tamperJpegScan, tamperPngDataHash, tamperText } from "./helpers/images";
 
 const WASM_BYTES = readFileSync("node_modules/@contentauth/c2pa-wasm/pkg/c2pa_bg.wasm");
 
@@ -24,6 +25,38 @@ afterEach(() => {
 
 function fixture(name: string): Uint8Array {
   return new Uint8Array(readFileSync(`test/fixtures/${name}`));
+}
+
+type StatusEntry = { code: string };
+type RawStore = { validation_results?: { activeManifest?: { success?: StatusEntry[]; failure?: StatusEntry[] } } };
+
+async function activeCodes(format: string, bytes: Uint8Array): Promise<{ success: string[]; failure: string[] }> {
+  await init({ module_or_path: WASM_BYTES });
+  const reader = await WasmReader.fromBytes(format, bytes, '{"verify":{"remote_manifest_fetch":false,"ocsp_fetch":false}}');
+  try {
+    const active = (JSON.parse(reader.json()) as RawStore).validation_results?.activeManifest;
+    return { success: (active?.success ?? []).map((s) => s.code), failure: (active?.failure ?? []).map((s) => s.code) };
+  } finally {
+    reader.free();
+  }
+}
+
+// Multiset difference: each code in `from` cancels one occurrence in `minus`.
+function codesMinus(from: string[], minus: string[]): string[] {
+  const rest = [...minus];
+  return from.filter((code) => {
+    const at = rest.indexOf(code);
+    if (at === -1) return true;
+    rest.splice(at, 1);
+    return false;
+  });
+}
+
+// Which success codes a tamper removed and which failure codes it added.
+async function statusChange(format: string, original: Uint8Array, tampered: Uint8Array): Promise<{ lost: string[]; gained: string[] }> {
+  const before = await activeCodes(format, original);
+  const after = await activeCodes(format, tampered);
+  return { lost: codesMinus(before.success, after.success), gained: codesMinus(after.failure, before.failure) };
 }
 
 const TRAINED = "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia";
@@ -779,23 +812,53 @@ describe("readC2pa", () => {
     expect(result.claimedModel).toBe("Bing Image Creator");
   });
 
+  // Each tamper test also pins the status-code change, so a helper that hits the
+  // wrong bytes cannot pass on an unrelated failure.
+  const IMAGE_TAMPERED = { lost: ["assertion.dataHash.match"], gained: ["assertion.dataHash.mismatch"] };
+  const ASSERTION_TAMPERED = { lost: ["assertion.hashedURI.match"], gained: ["assertion.hashedURI.mismatch"] };
+
   test("a tampered halloween: AI action intact, binding broken", async () => {
-    // Flipping one byte of the image data leaves the manifest and its actions
-    // readable, but the hard binding no longer matches.
-    const result = await readC2pa("image/png", tamperPngDataHash(fixture("ai-test-halloween.png")), WASM_BYTES);
+    const original = fixture("ai-test-halloween.png");
+    const tampered = tamperPngDataHash(original);
+    const result = await readC2pa("image/png", tampered, WASM_BYTES);
     expect(result.manifest).toBe("invalid");
     expect(result.aiAction).toBe(true);
     expect(result.integrity).toBe("unverified");
+    expect(await statusChange("image/png", original, tampered)).toEqual(IMAGE_TAMPERED);
   });
 
   test("an altered assertion: AI action intact, assertion hash broken", async () => {
-    // The opposite tamper: the image and the claim are untouched, so the claim
-    // signature and the data hash both verify. Only the assertion's hashed URI
-    // shows that the manifest was edited after signing.
-    const result = await readC2pa("image/png", tamperPngAssertion(fixture("ai-test-halloween.png")), WASM_BYTES);
+    // The image and the claim are untouched, so the claim signature and the data
+    // hash both verify; only the assertion's hashed URI shows the edit.
+    const original = fixture("ai-test-halloween.png");
+    const tampered = tamperText(original, "ChatGPT");
+    const result = await readC2pa("image/png", tampered, WASM_BYTES);
     expect(result.manifest).toBe("invalid");
     expect(result.aiAction).toBe(true);
     expect(result.integrity).toBe("unverified");
+    expect(result.claimedModel).toBe("ChatGPU / gpt-image");
+    expect(await statusChange("image/png", original, tampered)).toEqual(ASSERTION_TAMPERED);
+  });
+
+  test("a tampered microsoft image: the EKU tolerance does not cover a broken binding", async () => {
+    const original = fixture("ai-microsoft-bunny.jpg");
+    const tampered = tamperJpegScan(original);
+    const result = await readC2pa("image/jpeg", tampered, WASM_BYTES);
+    expect(result.manifest).toBe("invalid");
+    expect(result.aiAction).toBe(true);
+    expect(result.integrity).toBe("unverified");
+    expect(await statusChange("image/jpeg", original, tampered)).toEqual(IMAGE_TAMPERED);
+  });
+
+  test("an altered microsoft assertion: the EKU tolerance does not cover it", async () => {
+    const original = fixture("ai-microsoft-bunny.jpg");
+    const tampered = tamperText(original, "Bing Image Creator");
+    const result = await readC2pa("image/jpeg", tampered, WASM_BYTES);
+    expect(result.manifest).toBe("invalid");
+    expect(result.aiAction).toBe(true);
+    expect(result.integrity).toBe("unverified");
+    expect(result.claimedModel).toBe("Bing Image Creatos");
+    expect(await statusChange("image/jpeg", original, tampered)).toEqual(ASSERTION_TAMPERED);
   });
 
   test("iceland fixture: absent", async () => {
