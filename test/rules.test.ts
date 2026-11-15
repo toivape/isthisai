@@ -133,12 +133,17 @@ const CASES: {
     bad: [
       { path: "src/confirm/confirm.html", content: '<label><input type="checkbox" /> Don\'t ask again</label>\n' },
       { path: "src/confirm/confirm.ts", content: 'const label = "remember choice";\n' },
+      // The page renders its control text from _locales through data-i18n.
+      { path: "_locales/en/messages.json", content: '{"confirm_skip": {"message": "Don\'t ask again"}}' },
+      { path: "_locales/fi/messages.json", content: '{"confirm_skip": {"message": "Älä kysy uudelleen"}}' },
     ],
     clean: [
       { path: "src/confirm/confirm.html", content: "<button>Upload</button>\n" },
       // Only the confirmation window is the subject: the same words elsewhere
       // (a test name, a comment in another module) are not a control.
       { path: "src/background/check.ts", content: "// no ask again control here\n" },
+      { path: "_locales/en/messages.json", content: '{"confirm_upload_button": {"message": "Upload"}}' },
+      { path: "_locales/en/messages.json", content: '{"options_note": {"message": "Ask again later"}}' },
     ],
   },
   {

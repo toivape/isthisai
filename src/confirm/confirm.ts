@@ -36,8 +36,8 @@ function renderImageDetails(image: ConfirmParams): void {
   for (const [id, text] of lines) {
     const element = document.getElementById(id);
     if (element === null) continue;
-    if (text === undefined) element.setAttribute("hidden", "");
-    else element.textContent = text;
+    element.hidden = text === undefined;
+    if (text !== undefined) element.textContent = text;
   }
 }
 
