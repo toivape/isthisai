@@ -17,7 +17,8 @@ export interface LocalC2pa {
   manifest: "absent" | "present" | "invalid" | "remote_unfetched" | "error";
   aiAction: boolean;
   // Whether the claim signature validated, the signer was inside its validity
-  // window, and the image bytes matched the hard binding. Present only when a
+  // window, the image bytes matched the hard binding, and every failure was about
+  // the signer rather than the content. Present only when a
   // manifest was found and evaluated: there is nothing to assess otherwise, and
   // "invalid" alone cannot tell a rejected signer from a tampered image.
   integrity?: "verified" | "unverified";

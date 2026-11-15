@@ -268,7 +268,7 @@ C2PA mapping:
 - `JumbfNotFound` → `absent`. `RemoteManifestUrl(...)` → `remote_unfetched`. Other parser errors (`InvalidAsset`, …) → `error`.
 - `validation_state` `Valid` or `Trusted` → `present`; `Invalid` → `invalid`.
 - `aiAction` is true if the active manifest, or an ingredient manifest that the active manifest references and whose own validation passed, has an action whose `digitalSourceType` ends in `trainedAlgorithmicMedia` or `compositeWithTrainedAlgorithmicMedia`.
-- `integrity` is `verified` when the validator reported `claimSignature.validated` **and** `claimSignature.insideValidity` **and** one hard-binding match (`assertion.dataHash.match`, `bmffHash.match`, `boxesHash.match` or `collectionHash.match`), **and** no component reports a hash mismatch (`assertion.hashedURI.mismatch`, `ingredient.hashedURI.mismatch`, or a `dataHash`/`bmffHash`/`boxesHash`/`collectionHash` mismatch); `unverified` otherwise. It is set only for `present` and `invalid`, because there is no binding to assess for the other states.
+- `integrity` is `verified` when the validator reported `claimSignature.validated` **and** `claimSignature.insideValidity` **and** one hard-binding match (`assertion.dataHash.match`, `bmffHash.match`, `boxesHash.match` or `collectionHash.match`), **and** every failure code is one about the signer (`signingCredential.untrusted`, `signingCredential.invalid`, `claim.malformed`, or a `cawg.x509.`/`cawg.identity.` code); `unverified` otherwise. This is an allowlist so that any other failure, including a component hash mismatch or a code a future c2pa-wasm adds, fails closed. It is set only for `present` and `invalid`, because there is no binding to assess for the other states.
 
 #### Why `integrity` exists (policy, decided 2026-11-15)
 

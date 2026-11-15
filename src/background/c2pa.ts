@@ -117,16 +117,9 @@ function creatingActionOf(manifest: Record<string, unknown>): ActionLike | undef
   return actionsOf(manifest).find((action) => action.action === "c2pa.created");
 }
 
-// The C2PA standard status codes c2pa-rs requires before it will call a manifest
-// Valid: the claim signature validated and was inside its validity window, and a
-// hard-binding assertion matched. A tampered image *withholds* the match code
-// rather than reporting a new one, so requiring it is what keeps a broken binding
-// out of the verdict. BMFF containers (AVIF/HEIC) bind through bmffHash, not
-// dataHash, hence the list.
-//
-// A mismatch for any component is checked separately, because altering an
-// assertion inside the manifest leaves the claim signature AND the image hash
-// valid: only the assertion's hashed URI reveals it.
+// A tampered image *withholds* the binding match code rather than reporting a new
+// one, so the match code is required as positive evidence. BMFF containers
+// (AVIF/HEIC) bind through bmffHash, not dataHash, hence the list.
 const SIGNATURE_CODES = ["claimSignature.validated", "claimSignature.insideValidity"];
 const BINDING_MATCH_CODES = [
   "assertion.dataHash.match",
@@ -134,29 +127,30 @@ const BINDING_MATCH_CODES = [
   "assertion.boxesHash.match",
   "assertion.collectionHash.match",
 ];
-const COMPONENT_MISMATCH_CODES = [
-  "assertion.hashedURI.mismatch",
-  "ingredient.hashedURI.mismatch",
-  "assertion.dataHash.mismatch",
-  "assertion.bmffHash.mismatch",
-  "assertion.boxesHash.mismatch",
-  "assertion.collectionHash.mismatch",
-];
+// Failures about the signer, not the content. Every other failure code, including
+// ones a future c2pa-wasm adds, makes integrity unverified. claim.malformed is
+// here because the Microsoft signer reports it for an undecodable soft-binding
+// assertion.
+const TOLERATED_INTEGRITY_FAILURES = new Set(["signingCredential.untrusted", "signingCredential.invalid", "claim.malformed"]);
 
-function statusCodeSet(entries: unknown[]): Set<unknown> {
-  return new Set(entries.map((entry) => (isObject(entry) ? entry.code : undefined)));
+function statusCodesOf(entries: unknown[]): unknown[] {
+  return entries.map((entry) => (isObject(entry) ? entry.code : undefined));
+}
+
+function isToleratedIntegrityFailure(code: unknown): boolean {
+  if (typeof code !== "string") return false;
+  return TOLERATED_INTEGRITY_FAILURES.has(code) || TOLERATED_FAILURE_PREFIXES.some((prefix) => code.startsWith(prefix));
 }
 
 function integrityOf(validationResults: unknown): "verified" | "unverified" {
   const active = isObject(validationResults) ? validationResults.activeManifest : undefined;
   const success = isObject(active) && Array.isArray(active.success) ? active.success : [];
   const failure = isObject(active) && Array.isArray(active.failure) ? active.failure : [];
-  const successCodes = statusCodeSet(success);
-  const failureCodes = statusCodeSet(failure);
+  const successCodes = new Set(statusCodesOf(success));
   const signatureValidated = SIGNATURE_CODES.every((code) => successCodes.has(code));
   const bindingMatched = BINDING_MATCH_CODES.some((code) => successCodes.has(code));
-  const componentAltered = COMPONENT_MISMATCH_CODES.some((code) => failureCodes.has(code));
-  return signatureValidated && bindingMatched && !componentAltered ? "verified" : "unverified";
+  const onlyToleratedFailures = statusCodesOf(failure).every(isToleratedIntegrityFailure);
+  return signatureValidated && bindingMatched && onlyToleratedFailures ? "verified" : "unverified";
 }
 
 export function mapC2paStore(store: unknown): LocalC2pa {
@@ -191,7 +185,8 @@ export function mapC2paStore(store: unknown): LocalC2pa {
   return result;
 }
 
-export function mapC2paError(thrown: unknown): LocalC2pa {  const message = thrown instanceof Error ? thrown.message : String(thrown);
+export function mapC2paError(thrown: unknown): LocalC2pa {
+  const message = thrown instanceof Error ? thrown.message : String(thrown);
   if (message.startsWith("C2pa(JumbfNotFound)")) return { manifest: "absent", aiAction: false };
   if (message.startsWith("C2pa(RemoteManifestUrl(")) return { manifest: "remote_unfetched", aiAction: false };
   return { manifest: "error", aiAction: false };

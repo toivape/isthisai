@@ -632,6 +632,32 @@ describe("mapC2paStore: the integrity axis", () => {
     }
   });
 
+  test("unverified for any failure outside the tolerated signer codes", () => {
+    // Fail closed: a code this list does not name, including one a future
+    // c2pa-wasm adds, must not count as an intact binding.
+    for (const code of ["assertion.missing", "assertion.action.malformed", "timeStamp.mismatch", "future.unknownCode"]) {
+      const results = {
+        activeManifest: {
+          success: intactResults.activeManifest.success,
+          informational: [],
+          failure: [{ code: "signingCredential.invalid" }, { code }],
+        },
+      };
+      expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity, code).toBe("unverified");
+    }
+  });
+
+  test("verified with a tolerated CAWG identity failure", () => {
+    const results = {
+      activeManifest: {
+        success: intactResults.activeManifest.success,
+        informational: [],
+        failure: [{ code: "signingCredential.invalid" }, { code: "cawg.identity.malformed" }],
+      },
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("verified");
+  });
+
   test("verified when the only failures are about the signer, not the content", () => {
     // The Microsoft profile-failure shape: a rejected certificate and an
     // undecodable vendor assertion say nothing about the bytes.
