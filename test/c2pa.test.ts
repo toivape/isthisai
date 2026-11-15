@@ -180,6 +180,33 @@ const intactResults = {
 // profile allows (certificate_profile.rs).
 const EKU_REJECTION = { code: "signingCredential.invalid", explanation: "certificate missing required EKU" };
 
+// Every EKU message that file can emit. All of them mean the certificate is for
+// some other purpose, which says nothing about whether the content matches the
+// claim; the binding is checked separately.
+const EKU_EXPLANATIONS = [
+  "certificate missing required EKU",
+  "certificate missing digitalSignature EKU",
+  "certificate missing mandatory EKU",
+  "certificate 'any' EKU not allowed",
+  "certificate invalid set of EKUs",
+  "the certificate contains an invalid extended key usage (EKU) value",
+];
+
+// The Microsoft shape: c2pa-rs reports claim.malformed not for a malformed claim
+// but for a vendor soft-binding assertion it cannot decode, scoped by its URL.
+const SOFT_BINDING_MALFORMED = {
+  code: "claim.malformed",
+  url: "self#jumbf=/c2pa/urn:c2pa:x/c2pa.assertions/c2pa.soft-binding",
+  explanation: "soft binding assertion could not be decoded",
+};
+
+// A genuinely malformed claim, which must never be tolerated.
+const CLAIM_MALFORMED = {
+  code: "claim.malformed",
+  url: "self#jumbf=/c2pa/urn:c2pa:x/c2pa.claim",
+  explanation: "claim cbor invalid",
+};
+
 // The Microsoft shape: the binding is intact, but the signer certificate does
 // not meet the C2PA profile, which makes the manifest invalid without any
 // tampering.
@@ -187,7 +214,7 @@ const rejectedSignerResults = {
   activeManifest: {
     success: intactResults.activeManifest.success,
     informational: [],
-    failure: [{ code: "signingCredential.untrusted" }, EKU_REJECTION],
+    failure: [{ code: "signingCredential.untrusted" }, EKU_REJECTION, SOFT_BINDING_MALFORMED],
   },
 };
 
@@ -684,10 +711,26 @@ describe("mapC2paStore: the integrity axis", () => {
     }
   });
 
-  test("unverified when the signer certificate is invalid for a reason other than its EKU", () => {
+  test("verified for every certificate-profile explanation about the EKU", () => {
+    for (const explanation of EKU_EXPLANATIONS) {
+      const results = {
+        activeManifest: {
+          success: intactResults.activeManifest.success,
+          informational: [],
+          failure: [{ code: "signingCredential.invalid", explanation }],
+        },
+      };
+      expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity, explanation).toBe("verified");
+    }
+  });
+
+  test("unverified for a certificate-profile failure that is not about the EKU", () => {
+    // A certificate rejected for being self-signed, expired or weak is not a
+    // reason to trust the claim, so it must fail closed.
     for (const failure of [
       { code: "signingCredential.invalid", explanation: "certificate key length too short" },
-      { code: "signingCredential.invalid", explanation: "certificate 'any' EKU not allowed" },
+      { code: "signingCredential.invalid", explanation: "certificate issuer and subject cannot be the same (self-signed disallowed)" },
+      { code: "signingCredential.invalid", explanation: "certificate expired" },
       { code: "signingCredential.invalid" },
     ]) {
       const results = {
@@ -695,6 +738,92 @@ describe("mapC2paStore: the integrity axis", () => {
       };
       expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity, failure.explanation).toBe("unverified");
     }
+  });
+
+  test("an undecodable assertion is tolerated, a malformed claim is not", () => {
+    // claim.malformed carries a broader meaning than the cause observed here, so
+    // only the assertion-scoped form may be tolerated.
+    const assertionScoped = {
+      activeManifest: { success: intactResults.activeManifest.success, informational: [], failure: [SOFT_BINDING_MALFORMED] },
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, assertionScoped, "Invalid")).integrity).toBe("verified");
+    const claimScoped = {
+      activeManifest: { success: intactResults.activeManifest.success, informational: [], failure: [CLAIM_MALFORMED] },
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, claimScoped, "Invalid")).integrity).toBe("unverified");
+  });
+
+  test("unverified when an ingredient delta has a non-tolerated failure", () => {
+    // c2pa-rs makes the whole store invalid for a non-tolerated failure in any
+    // ingredient delta, so the allowlist has to cover that axis too.
+    const results = {
+      activeManifest: { success: intactResults.activeManifest.success, informational: [], failure: [EKU_REJECTION] },
+      ingredientDeltas: [
+        {
+          ingredientAssertionURI: "self#jumbf=/c2pa/urn:x/c2pa.assertions/c2pa.ingredient.v3",
+          validationDeltas: { success: [], informational: [], failure: [{ code: "ingredient.hashedURI.mismatch" }] },
+        },
+      ],
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("unverified");
+  });
+
+  test("verified when every ingredient delta failure is tolerated too", () => {
+    // The Gemini shape: an ingredient whose signer is simply untrusted.
+    const results = {
+      activeManifest: { success: intactResults.activeManifest.success, informational: [], failure: [] },
+      ingredientDeltas: [
+        {
+          ingredientAssertionURI: "self#jumbf=/c2pa/urn:x/c2pa.assertions/c2pa.ingredient.v3",
+          validationDeltas: { success: [], informational: [], failure: [{ code: "signingCredential.untrusted" }] },
+        },
+      ],
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("verified");
+  });
+
+  test("unverified without any one of the three positive requirements, even with no failures", () => {
+    // Each requirement is isolated with an empty failure list, so a weakened
+    // AND-chain (or `some` instead of `every`) cannot hide behind a failure code.
+    const requirements = [
+      ["claimSignature.insideValidity", "assertion.dataHash.match"], // no claimSignature.validated
+      ["claimSignature.validated", "assertion.dataHash.match"], // no claimSignature.insideValidity
+      ["claimSignature.validated", "claimSignature.insideValidity"], // no binding match
+    ];
+    for (const codes of requirements) {
+      const results = {
+        activeManifest: { success: codes.map((code) => ({ code })), informational: [], failure: [] },
+      };
+      expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity, codes.join(",")).toBe("unverified");
+    }
+  });
+
+  test("unverified when a failure entry carries no usable code", () => {
+    // Fail closed: an entry the allowlist cannot interpret is not tolerated.
+    for (const entry of [{}, { explanation: "x" }, "signingCredential.untrusted", null]) {
+      const results = {
+        activeManifest: { success: intactResults.activeManifest.success, informational: [], failure: [entry] },
+      };
+      expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity, JSON.stringify(entry)).toBe("unverified");
+    }
+  });
+
+  test("malformed failure and delta lists contribute nothing", () => {
+    // Lists of the wrong shape carry no failures to count, which is not itself a
+    // reason to distrust an otherwise intact manifest.
+    const results = {
+      activeManifest: { success: intactResults.activeManifest.success, informational: [], failure: "x" },
+      ingredientDeltas: [{ validationDeltas: "x" }, null, { validationDeltas: { failure: "x" } }],
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("verified");
+  });
+
+  test("a non-array ingredientDeltas contributes nothing", () => {
+    const results = {
+      activeManifest: { success: intactResults.activeManifest.success, informational: [], failure: [] },
+      ingredientDeltas: "x",
+    };
+    expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("verified");
   });
 
   test("verified with a tolerated CAWG identity failure", () => {
@@ -706,13 +835,6 @@ describe("mapC2paStore: the integrity axis", () => {
       },
     };
     expect(mapC2paStore(storeWith("m", { m: active }, results, "Invalid")).integrity).toBe("verified");
-  });
-
-  test("verified when the only failures are about the signer, not the content", () => {
-    // The Microsoft profile-failure shape: a rejected certificate and an
-    // undecodable vendor assertion say nothing about the bytes.
-    const result = mapC2paStore(storeWith("m", { m: active }, rejectedSignerResults, "Invalid"));
-    expect(result.integrity).toBe("verified");
   });
 
   test("a rejected signer certificate leaves the binding verified while the manifest is invalid", () => {
