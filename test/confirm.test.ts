@@ -13,7 +13,10 @@ describe("parseConfirmParams", () => {
       origin: "https://page.example",
       mediaType: "image/jpeg",
       sizeBytes: 459248,
+      converted: false,
     });
+    expect(parseConfirmParams(`${search}&converted=1`).converted).toBe(true);
+    expect(parseConfirmParams(`${search}&converted=0`).converted).toBe(false);
   });
 
   test("an absent or empty origin is absent, not an empty label", () => {

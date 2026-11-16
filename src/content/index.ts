@@ -5,7 +5,7 @@
 // manifest content_scripts entry (hard rule 1).
 
 import { badgeAction, isBadgeVisible } from "./badge";
-import { findImages } from "./findImages";
+import { findImages, rememberDataUrl } from "./findImages";
 import { installOnce } from "./installOnce";
 import { DISMISS_ID, isStaleUpdate, verdictPresentation } from "./presentation";
 import { readBlobInPage } from "./readBlob";
@@ -66,6 +66,13 @@ function createShell(): ContentShell {
 
   let popup: PopupHandle | undefined;
   const badges = new Map<HTMLImageElement, HTMLDivElement>();
+  // The data: image each recent check was about. A data: image is the only case
+  // the OpenAI flow cannot re-fetch on its own: the check record stores its URL
+  // without the payload (PLAN §3), so the page supplies the real one rather than
+  // guessing between two data: images of the same type.
+  const checkedSrcUrls = new Map<string, string>();
+  const rememberSrcUrl = (checkId: string, srcUrl: string): void => rememberDataUrl(checkedSrcUrls, checkId, srcUrl);
+
   let activeCheckId: string | undefined;
 
   type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
@@ -183,6 +190,7 @@ function createShell(): ContentShell {
 
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
+    rememberSrcUrl(update.checkId, update.srcUrl);
     if (isStaleUpdate(activeCheckId, update)) return;
     closePopup();
     if (update.status === "failed") {
@@ -214,7 +222,7 @@ function createShell(): ContentShell {
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
   chrome.runtime.onMessage.addListener((incoming: unknown): Promise<ReadBlobReply> | undefined => {
     if (!isReadBlob(incoming)) return undefined;
-    return readBlobInPage(incoming.url);
+    return readBlobInPage(incoming.url, checkedSrcUrls.get(incoming.checkId));
   });
 
   return { handleCheckUpdate };

@@ -119,6 +119,9 @@
   "confirm_size": {
     "message": "Size: $1"
   },
+  "confirm_converted": {
+    "message": "OpenAI does not accept this format. The server's converted copy of the image will be downloaded again and sent instead; it may differ from the one you checked."
+  },
   "confirm_upload_button": {
     "message": "Upload"
   },

@@ -3,6 +3,7 @@ import {
   collectImage,
   decodeBase64WithLimit,
   decodeDataUrl,
+  fetchConvertedImage,
   fetchImageBytes,
   IMAGE_ACCEPT,
   readBlobRequest,
@@ -12,7 +13,7 @@ import { needsPermissionRequest, originsToCheck, httpOrigin } from "../src/backg
 import { decodeBase64, encodeBase64 } from "../src/shared/base64";
 import { MAX_BLOB_BYTES, MAX_IMAGE_BYTES } from "../src/shared/limits";
 import { isReadBlob } from "../src/shared/types";
-import { minimalPng } from "./helpers/images";
+import { minimalPng, minimalWebp } from "./helpers/images";
 
 const KIB = 1024;
 const MIB = KIB * KIB;
@@ -499,6 +500,34 @@ describe("fetchImageBytes", () => {
   }, 10_000);
 });
 
+describe("fetchConvertedImage", () => {
+  test("asks for an OpenAI-accepted format with the conversion Accept header", async () => {
+    const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push([input, init]);
+      return streamResponse([minimalWebp()]);
+    }) as typeof fetch;
+    const result = await fetchConvertedImage("https://cdn.example/i.avif", { fetchImpl });
+    expect(result.kind).toBe("bytes");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe("https://cdn.example/i.avif");
+    // Assert the literal: comparing against the imported constant would move
+    // with the mutant and detect nothing.
+    expect(calls[0][1]?.headers).toEqual({ Accept: "image/webp,image/png,image/jpeg" });
+    expect(calls[0][1]?.credentials).toBe("omit");
+  });
+
+  test("a caller-supplied accept is replaced by the conversion value", async () => {
+    const calls: Array<RequestInit | undefined> = [];
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init);
+      return streamResponse([minimalWebp()]);
+    }) as typeof fetch;
+    await fetchConvertedImage("https://cdn.example/i.avif", { fetchImpl, accept: "image/avif" });
+    expect(calls[0]?.headers).toEqual({ Accept: "image/webp,image/png,image/jpeg" });
+  });
+});
+
 describe("sha256Hex", () => {
   test("computes the SHA-256 hex digest of known bytes", async () => {
     expect(await sha256Hex(new Uint8Array(0))).toBe(
@@ -542,6 +571,46 @@ describe("collectImage", () => {
     });
     expect(collected.kind).toBe("image");
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  test("a payload-free data: url is re-read from the page, never fetched", async () => {
+    // The cache stores a data: srcUrl without its payload (PLAN §3), so the
+    // openai flow would upload an empty image if it fetched it. It asks the page
+    // for the image instead, exactly as for a blob: URL.
+    const body = minimalPng();
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("a payload-free data: url must not be fetched");
+    });
+    const readBlob = vi.fn(async (url: string) => {
+      expect(url).toBe("data:image/png;base64,");
+      return { ok: true as const, base64: encodeBase64(body) };
+    });
+    const collected = await collectImage("data:image/png;base64,", { fetchImpl, readBlob });
+    expect(collected.kind).toBe("image");
+    if (collected.kind !== "image") return;
+    expect([...collected.bytes]).toEqual([...body]);
+    expect(readBlob).toHaveBeenCalledOnce();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  test("a malformed data: url with no comma is also re-read from the page", async () => {
+    const body = minimalPng();
+    const collected = await collectImage("data:", {
+      fetchImpl: async () => {
+        throw new Error("must not fetch");
+      },
+      readBlob: async () => ({ ok: true, base64: encodeBase64(body) }),
+    });
+    expect(collected.kind).toBe("image");
+  });
+
+  test("a full data: url is decoded, not asked of the page", async () => {
+    const readBlob = vi.fn();
+    const collected = await collectImage(`data:image/png;base64,${encodeBase64(minimalPng())}`, {
+      readBlob,
+    });
+    expect(collected.kind).toBe("image");
+    expect(readBlob).not.toHaveBeenCalled();
   });
 
   test("blob: url goes through readBlob and round-trips base64", async () => {

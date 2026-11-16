@@ -3,14 +3,24 @@
 // at any time, so listeners are registered synchronously and no state is
 // kept in module variables.
 
-import type { CheckError, CheckUpdate, DismissPopup, KeyStatusReply, ReadBlobReply, TestKeyReply } from "../shared/types";
+import type {
+  CheckError,
+  CheckUpdate,
+  DismissPopup,
+  KeyStatusReply,
+  OpenAiRequestReply,
+  ReadBlobReply,
+  TestKeyReply,
+} from "../shared/types";
 import { resultWindowPath } from "../shared/errors";
-import { isKeyStatus, isTestKey } from "../shared/types";
+import { isConfirmUpload, isKeyStatus, isOpenAiRequest, isTestKey } from "../shared/types";
 import { isOptionsPageSender, keyStatus, testKey } from "./apiKey";
 import { sessionStore } from "./cache";
 import { runCheckSteps } from "./check";
+import { PendingConsents } from "./consent";
 import { readC2pa } from "./c2pa";
-import { readBlobRequest } from "./fetchImage";
+import { collectImage, readBlobRequest } from "./fetchImage";
+import { runOpenAiFlow, uploadRegistry } from "./openaiFlow";
 import { scanXmp } from "./xmp";
 import { needsPermissionRequest } from "./permissions";
 
@@ -188,17 +198,113 @@ async function loadSample(): Promise<Uint8Array> {
 // content script must not be able to test or read about the key, and must not be
 // able to make the worker upload anything (PLAN §5, §6).
 const OPTIONS_URL_PREFIX = chrome.runtime.getURL("src/options/");
+const CONFIRM_URL_PREFIX = chrome.runtime.getURL("src/confirm/");
 
-chrome.runtime.onMessage.addListener((incoming: unknown, sender, sendResponse: (reply: KeyStatusReply | TestKeyReply) => void) => {
-  if (!isKeyStatus(incoming) && !isTestKey(incoming)) return undefined;
-  if (!isOptionsPageSender(sender, OPTIONS_URL_PREFIX)) return undefined;
-  if (isKeyStatus(incoming)) {
-    void keyStatus({ readKey: readStoredKey }).then(sendResponse, console.error);
-    return true;
-  }
-  if (isTestKey(incoming)) {
-    void testKey({ readKey: readStoredKey, loadSample }).then(sendResponse, console.error);
-    return true;
-  }
-  return undefined;
+// The open upload confirmations, and which window is waiting on which check, so
+// that a window the user simply closes counts as a decline (PLAN §4 step 8.2).
+const pendingConsents = new PendingConsents(CONFIRM_URL_PREFIX);
+const consentWindows = new Map<number, string>();
+// One registry for the whole worker: it serializes OpenAI uploads per image and
+// remembers the ones that succeeded (see uploadRegistry). Ephemeral: a restart
+// falls back to the session cache.
+const uploads = uploadRegistry();
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  const checkId = consentWindows.get(windowId);
+  if (checkId === undefined) return;
+  consentWindows.delete(windowId);
+  pendingConsents.decline(checkId);
 });
+
+async function requestConsent(checkId: string, path: string): Promise<boolean> {
+  // A window is already open for this check: never open a second one, because
+  // both carry the same checkId and the stale one could answer (or close) the
+  // replacement. The duplicate is declined; the open window owns the answer.
+  if (pendingConsents.isWaiting(checkId)) {
+    const existingWindow = windowForCheck(checkId);
+    if (existingWindow !== undefined) {
+      await chrome.windows.update(existingWindow, { focused: true }).catch(() => undefined);
+    }
+    return false;
+  }
+  const answer = pendingConsents.open(checkId);
+  try {
+    const created = await chrome.windows.create({
+      type: "popup",
+      url: chrome.runtime.getURL(path),
+      width: 420,
+      height: 320,
+    });
+    if (created?.id !== undefined) consentWindows.set(created.id, checkId);
+  } catch (error) {
+    // No window means no consent: decline rather than hang on an answer that
+    // can never arrive.
+    console.error("consent window failed", error);
+    pendingConsents.decline(checkId);
+  }
+  return answer;
+}
+
+function windowForCheck(checkId: string): number | undefined {
+  for (const [windowId, id] of consentWindows) if (id === checkId) return windowId;
+  return undefined;
+}
+
+// The OpenAI check (PLAN §4 step 8). The flow decides everything and answers the
+// content script; this only wires chrome to it. An ignored request (a sender
+// that does not own the check) gets no reply, and a worker-side failure closes
+// the channel unanswered, which the popup reads as an unusable reply.
+async function runOpenAiRequest(checkId: string, sender: chrome.runtime.MessageSender): Promise<OpenAiRequestReply | undefined> {
+  const tabId = sender.tab?.id;
+  const frameId = sender.frameId;
+  const outcome = await runOpenAiFlow(
+    {
+      store: sessionStore,
+      readKey: readStoredKey,
+      requestConsent: ({ checkId: id, path }) => requestConsent(id, path),
+      readImage: (record) =>
+        collectImage(record.srcUrl, {
+          readBlob: (url) => readBlobInFrame(record.tabId, record.frameId, record.checkId, url),
+        }),
+      // One registry for the whole worker, so two checks of one image coalesce.
+      uploads,
+      sendUpdate: (update) => {
+        if (tabId === undefined || frameId === undefined) return undefined;
+        return chrome.tabs.sendMessage(tabId, update, { frameId }).catch(() => undefined);
+      },
+    },
+    { checkId, sender: { tabId, frameId } },
+  );
+  if (outcome.kind === "ignored") return undefined;
+  if (outcome.kind === "error") return { ok: false, error: outcome.error };
+  return { ok: true };
+}
+
+chrome.runtime.onMessage.addListener(
+  (incoming: unknown, sender, sendResponse: (reply?: KeyStatusReply | TestKeyReply | OpenAiRequestReply) => void) => {
+    if (isOpenAiRequest(incoming)) {
+      void runOpenAiRequest(incoming.checkId, sender).then(sendResponse, (error: unknown) => {
+        console.error("openai request failed", error);
+        sendResponse(undefined);
+      });
+      return true;
+    }
+    if (isConfirmUpload(incoming)) {
+      // The sender and the checkId are both checked in PendingConsents; a
+      // forged answer changes nothing.
+      pendingConsents.answer(incoming.checkId, sender, incoming.confirmed);
+      return undefined;
+    }
+    if (!isKeyStatus(incoming) && !isTestKey(incoming)) return undefined;
+    if (!isOptionsPageSender(sender, OPTIONS_URL_PREFIX)) return undefined;
+    if (isKeyStatus(incoming)) {
+      void keyStatus({ readKey: readStoredKey }).then(sendResponse, console.error);
+      return true;
+    }
+    if (isTestKey(incoming)) {
+      void testKey({ readKey: readStoredKey, loadSample }).then(sendResponse, console.error);
+      return true;
+    }
+    return undefined;
+  },
+);

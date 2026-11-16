@@ -48,6 +48,6 @@ export function sniffMediaType(bytes: Uint8Array): SniffedType {
 
 // OpenAI accepts PNG, JPEG, WebP and GIF; AVIF and HEIC need the
 // server-converted re-fetch (PLAN §4 step 8.4).
-export function isOpenAiType(type: SniffedType): boolean {
+export function isOpenAiType(type: string): boolean {
   return type === "image/png" || type === "image/jpeg" || type === "image/webp" || type === "image/gif";
 }

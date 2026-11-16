@@ -11,6 +11,7 @@ import {
   isOpenAiAvailability,
   isOpenAiError,
   isOpenAiRequest,
+  isOpenAiRequestReply,
   isReadBlob,
   isReadBlobReply,
   isTestKey,
@@ -275,6 +276,12 @@ const guardCases: GuardCase[] = [
     guard: isOpenAiRequest,
     valid: [{ type: "openaiRequest", checkId: "c1" }],
     invalid: [...notObjects, { type: "openaiRequest" }, { type: "openaiRequest", checkId: 5 }],
+  },
+  {
+    name: "isOpenAiRequestReply",
+    guard: isOpenAiRequestReply,
+    valid: [{ ok: true }, { ok: false, error: { code: "cancelled" } }],
+    invalid: [...notObjects, {}, { ok: false }, { ok: false, error: { code: "bogus" } }, { ok: "sure" }],
   },
   {
     name: "isConfirmUpload",

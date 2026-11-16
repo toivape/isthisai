@@ -119,6 +119,9 @@
   "confirm_size": {
     "message": "Koko: $1"
   },
+  "confirm_converted": {
+    "message": "OpenAI ei hyväksy tätä muotoa. Palvelimen muuntama kopio kuvasta ladataan uudelleen ja lähetetään sen sijaan; se voi poiketa tarkistamastasi kuvasta."
+  },
   "confirm_upload_button": {
     "message": "Lähetä"
   },

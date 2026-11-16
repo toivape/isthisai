@@ -1,5 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { findImages, matchesSrcUrl } from "../src/content/findImages";
+import {
+  MAX_REMEMBERED_DATA_CHARS,
+  MAX_REMEMBERED_DATA_URLS,
+  dataUrlToRead,
+  findImages,
+  findSourceByPrefix,
+  matchedSrcPrefix,
+  matchesSrcUrl,
+  rememberDataUrl,
+} from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
 import { isBadgeVisible, shouldBadge } from "../src/content/badge";
 import { isStaleUpdate, verdictPresentation, DISMISS_ID } from "../src/content/presentation";
@@ -127,6 +136,136 @@ describe("findImages", () => {
     } as unknown as ParentNode;
     findImages("https://example.com/a.png", root);
     expect(calls).toEqual(["img"]);
+  });
+});
+
+describe("the data: source to read", () => {
+  // The cache stores a data: srcUrl without its payload (PLAN §3), so the upload
+  // flow asks the page for the image by that prefix. The page must hand back the
+  // URL that matched, not another candidate: a srcset currentSrc is a different
+  // URL, and fetching it is an unintended request (hard rule 7).
+
+  test("returns the matched source, not a srcset candidate", () => {
+    const img = fakeImage({ src: "data:image/png;base64,AAAA", currentSrc: "https://cdn.example/photo.jpg" });
+    expect(matchedSrcPrefix(img, "data:image/png;base64,")).toBe("data:image/png;base64,AAAA");
+  });
+
+  test("returns currentSrc when that is the match", () => {
+    const img = fakeImage({ src: "placeholder.gif", currentSrc: "data:image/png;base64,AAAA" });
+    expect(matchedSrcPrefix(img, "data:image/png;base64,")).toBe("data:image/png;base64,AAAA");
+  });
+
+  test("returns undefined when nothing matches", () => {
+    const jpeg = fakeImage({ src: "data:image/jpeg;base64,AAAA", currentSrc: "data:image/jpeg;base64,AAAA" });
+    expect(matchedSrcPrefix(jpeg, "data:image/png;base64,")).toBeUndefined();
+    expect(matchedSrcPrefix(null, "data:")).toBeUndefined();
+  });
+
+  test("findSourceByPrefix skips the images that do not match", () => {
+    const other = fakeImage({ src: "data:image/jpeg;base64,CCCC", currentSrc: "data:image/jpeg;base64,CCCC" });
+    const png = fakeImage({ src: "data:image/png;base64,PPPP", currentSrc: "data:image/png;base64,PPPP" });
+    const root = { querySelectorAll: (selector: string) => (selector === "img" ? [other, png] : []) } as unknown as ParentNode;
+    expect(findSourceByPrefix("data:image/png;base64,", root)).toBe("data:image/png;base64,PPPP");
+  });
+
+  test("an empty prefix never matches: it would match everything", () => {
+    const img = fakeImage({ src: "data:image/png;base64,AAAA", currentSrc: "data:image/png;base64,AAAA" });
+    expect(matchedSrcPrefix(img, "")).toBeUndefined();
+    expect(findSourceByPrefix("", { querySelectorAll: () => [img] } as unknown as ParentNode)).toBeUndefined();
+  });
+
+  test("rejects a non-image value and a missing src or currentSrc", () => {
+    expect(matchedSrcPrefix({}, "data:")).toBeUndefined();
+    expect(matchedSrcPrefix({ src: "data:x" }, "data:")).toBeUndefined();
+    expect(matchedSrcPrefix({ currentSrc: "data:x" }, "data:")).toBeUndefined();
+  });
+
+  test("an empty src is not resolved against the baseURI into a match", () => {
+    // <img src=""> resolves to the page URL. The guard must reject it before
+    // resolvedSrc turns it into a document URL that could match the prefix.
+    const img = fakeImage({ src: "", currentSrc: "placeholder", baseURI: "https://example.com/page.html" });
+    expect(matchedSrcPrefix(img, "https://example.com/page")).toBeUndefined();
+  });
+
+  test("dataUrlToRead prefers the exact URL the check saw, then the first match", () => {
+    // Two PNG data: images share the stripped prefix; only the remembered URL
+    // says which one was checked.
+    const first = fakeImage({ src: "data:image/png;base64,AAAA", currentSrc: "data:image/png;base64,AAAA" });
+    const second = fakeImage({ src: "data:image/png;base64,BBBB", currentSrc: "data:image/png;base64,BBBB" });
+    const root = { querySelectorAll: (selector: string) => (selector === "img" ? [first, second] : []) } as unknown as ParentNode;
+
+    expect(dataUrlToRead("data:image/png;base64,", "data:image/png;base64,BBBB", root)).toBe("data:image/png;base64,BBBB");
+    expect(dataUrlToRead("data:image/png;base64,", undefined, root)).toBe("data:image/png;base64,AAAA");
+    // A remembered URL that no longer matches the stored prefix is not used.
+    expect(dataUrlToRead("data:image/png;base64,", "https://cdn.example/other.png", root)).toBe("data:image/png;base64,AAAA");
+    // The payload-free form is what the worker's own done update remembers; it is
+    // not the image, so the page's real one is read instead of an empty payload.
+    expect(dataUrlToRead("data:image/png;base64,", "data:image/png;base64,", root)).toBe("data:image/png;base64,AAAA");
+    // Nothing on the page matches at all.
+    expect(dataUrlToRead("data:image/png;base64,", undefined, { querySelectorAll: () => [] } as unknown as ParentNode)).toBeUndefined();
+  });
+});
+
+describe("rememberDataUrl", () => {
+  const dataUrl = (chars: number): string => `data:image/png;base64,${"A".repeat(chars - "data:image/png;base64,".length)}`;
+
+  test("keeps the full URL and ignores the payload-free repeat", () => {
+    const map = new Map<string, string>();
+    rememberDataUrl(map, "c1", "data:image/png;base64,AAAA");
+    rememberDataUrl(map, "c1", "data:image/png;base64,");
+    expect(map.get("c1")).toBe("data:image/png;base64,AAAA");
+  });
+
+  test("a longer URL replaces a shorter one, an equal-length one does not, and a refresh moves the check to newest", () => {
+    const map = new Map<string, string>();
+    rememberDataUrl(map, "a", "data:image/png;base64,");
+    rememberDataUrl(map, "b", "data:image/png;base64,BBBB");
+    rememberDataUrl(map, "a", "data:image/png;base64,AAAA");
+    expect(map.get("a")).toBe("data:image/png;base64,AAAA");
+    expect([...map.keys()]).toEqual(["b", "a"]);
+    rememberDataUrl(map, "a", "data:image/png;base64,CCCC");
+    expect(map.get("a")).toBe("data:image/png;base64,AAAA");
+  });
+
+  test("exactly the cap is kept, in one URL or across several", () => {
+    const one = new Map<string, string>();
+    rememberDataUrl(one, "a", dataUrl(MAX_REMEMBERED_DATA_CHARS));
+    expect(one.has("a")).toBe(true);
+
+    const two = new Map<string, string>();
+    rememberDataUrl(two, "a", dataUrl(MAX_REMEMBERED_DATA_CHARS / 2));
+    rememberDataUrl(two, "b", dataUrl(MAX_REMEMBERED_DATA_CHARS / 2));
+    expect([...two.keys()]).toEqual(["a", "b"]);
+  });
+
+  test("a non-data: URL forgets the check", () => {
+    const map = new Map([["c1", "data:image/png;base64,AAAA"]]);
+    rememberDataUrl(map, "c1", "https://cdn.example/a.png");
+    expect(map.has("c1")).toBe(false);
+  });
+
+  test("evicts the oldest by count", () => {
+    const map = new Map<string, string>();
+    for (let i = 0; i <= MAX_REMEMBERED_DATA_URLS; i += 1) rememberDataUrl(map, `c${i}`, `data:image/png;base64,${i}`);
+    expect(map.size).toBe(MAX_REMEMBERED_DATA_URLS);
+    expect(map.has("c0")).toBe(false);
+    expect(map.has(`c${MAX_REMEMBERED_DATA_URLS}`)).toBe(true);
+  });
+
+  test("evicts the oldest by total size, not just count", () => {
+    const map = new Map<string, string>();
+    const third = Math.floor(MAX_REMEMBERED_DATA_CHARS / 3) + 1;
+    rememberDataUrl(map, "a", dataUrl(third));
+    rememberDataUrl(map, "b", dataUrl(third));
+    rememberDataUrl(map, "c", dataUrl(third));
+    expect([...map.keys()]).toEqual(["b", "c"]);
+  });
+
+  test("a URL over the cap is not kept, and drops the stale entry for that check", () => {
+    const map = new Map([["a", "data:image/png;base64,AAAA"]]);
+    rememberDataUrl(map, "big", dataUrl(MAX_REMEMBERED_DATA_CHARS + 1));
+    expect(map.has("big")).toBe(false);
+    expect(map.get("a")).toBe("data:image/png;base64,AAAA");
   });
 });
 
