@@ -164,13 +164,109 @@
   "popup_headline_no_signal": {
     "message": "Tekoälyn merkkiä ei löytynyt"
   },
-  "popup_detail_claimed_issuer": {
-    "message": "Content Credentials -merkintä: $1 (väitetty, allekirjoittajaa ei ole vahvistettu)"
-  },
   "popup_headline_incomplete": {
     "message": "Tarkistus jäi kesken"
   },
   "popup_detail_incomplete": {
     "message": "Kuvaa ei voitu tarkistaa kokonaan, joten tulosta ei voida antaa."
+  },
+  "popup_line_c2pa": {
+    "message": "Content Credentials (C2PA)"
+  },
+  "popup_c2pa_absent": {
+    "message": "Content Credentials -merkintää ei löytynyt."
+  },
+  "popup_c2pa_present_ai": {
+    "message": "Merkintä on olemassa ja kertoo kuvan olevan tekoälyn tuottama."
+  },
+  "popup_c2pa_present_other": {
+    "message": "Merkintä on olemassa, mutta se ei kerro tekoälystä."
+  },
+  "popup_c2pa_unverified": {
+    "message": "Merkintä on olemassa mutta ei vahvistunut; kuvaa on voitu muokata."
+  },
+  "popup_c2pa_profile": {
+    "message": "Vahvistettu, mutta allekirjoittajan varmenne ei ole C2PA-profiilissa."
+  },
+  "popup_c2pa_remote": {
+    "message": "Säilytetään muualla, ei ladattu."
+  },
+  "popup_c2pa_error": {
+    "message": "Content Credentials -merkintää ei voitu lukea."
+  },
+  "popup_claimed_issuer": {
+    "message": "Väitetty myöntäjä: $1"
+  },
+  "popup_claimed_model": {
+    "message": "Väitetty malli: $1"
+  },
+  "popup_line_xmp": {
+    "message": "Metadata (XMP, allekirjoittamaton)"
+  },
+  "popup_xmp_detected": {
+    "message": "Metadata kertoo tekoälyn tuottamasta kuvasta."
+  },
+  "popup_xmp_source_type": {
+    "message": "DigitalSourceType: $1"
+  },
+  "popup_xmp_generator": {
+    "message": "Vihje luojasta: $1"
+  },
+  "popup_xmp_not_detected": {
+    "message": "Tällaista metadataa ei löytynyt."
+  },
+  "popup_xmp_error": {
+    "message": "Metadataa ei voitu lukea."
+  },
+  "popup_line_synthid": {
+    "message": "Vesileima (SynthID, OpenAI:n kautta)"
+  },
+  "popup_synthid_not_checked": {
+    "message": "Ei tarkistettu."
+  },
+  "popup_synthid_detected": {
+    "message": "Tekoälyn vesileima löytyi."
+  },
+  "popup_synthid_not_detected": {
+    "message": "Tekoälyn vesileimaa ei löytynyt."
+  },
+  "popup_synthid_converted": {
+    "message": "OpenAI sai kopion, jonka palvelin muunsi; muuntaminen voi poistaa merkkejä."
+  },
+  "popup_line_openai_c2pa": {
+    "message": "Content Credentials (OpenAI:n kautta)"
+  },
+  "popup_openai_c2pa_detected": {
+    "message": "Content Credentials -merkintä löytyi."
+  },
+  "popup_openai_c2pa_not_detected": {
+    "message": "Content Credentials -merkintää ei löytynyt."
+  },
+  "popup_openai_c2pa_validation_trusted": {
+    "message": "Vahvistustila: luotettu"
+  },
+  "popup_openai_c2pa_validation_valid": {
+    "message": "Vahvistustila: kelvollinen"
+  },
+  "popup_openai_c2pa_validation_invalid": {
+    "message": "Vahvistustila: virheellinen"
+  },
+  "popup_openai_c2pa_validation_not_present": {
+    "message": "Vahvistustila: ei läsnä"
+  },
+  "popup_openai_note": {
+    "message": "OpenAI havaitsee vain OpenAI:n omat merkit."
+  },
+  "popup_button_openai": {
+    "message": "Tarkista OpenAIlla"
+  },
+  "popup_button_no_key": {
+    "message": "API-avainta ei ole tallennettu. Lisää se laajennuksen asetuksissa."
+  },
+  "toast_no_signal": {
+    "message": "Tekoälyn merkkiä ei löytynyt. Se ei todista, että kuva on ihmisen tekemä."
+  },
+  "toast_interrupted": {
+    "message": "Tarkistus keskeytyi, yritä uudelleen."
   }
 }
