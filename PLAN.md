@@ -412,15 +412,15 @@ An AI signal **with** a caveat (TÄ, but the popup must qualify it):
 12. Halloween re-saved JPEG: local checks find nothing; the OpenAI check finds SynthID and shows TÄ.
 13. M1: popup closes on Esc and on a click outside it (in a normal page and in an iframe).
 14. From M2 (M1 never badges, the worker only sends `checking`): the TÄ badge follows its image on scroll and resize, and is hidden while the image is outside the viewport.
-15. M1: after `chrome://extensions` → reload extension, a menu click on an already-open page still injects and shows the checking popup (no stale state).
+15. M1: after `chrome://extensions` → reload extension, a menu click on an already-open page still injects and shows the checking spinner over the image (or the corner checking popup when no element carries the URL), with no stale state.
 16. M1: the placeholder result view in the extension window (`?view=result`) renders headline and caveat in both UI languages.
 17. M1: a page script dispatching synthetic click, mousedown or Escape events does not open or close the popup; a page rule like `div { transform: translateZ(0) }` does not displace the popup.
 18. M1: check an image in the main frame, then one in an iframe (and the reverse): only the newest popup stays.
 19. M2: right-click a `blob:` image (e.g. canvas `toBlob` → `<img src=blob:…>`) twice in a row on the same page: the first check reads the blob (no `fetch_failed`), and the worker logs one `image collected` line per check (no duplicate reads from stacked listeners).
-20. M2: decline the permission prompt on a cross-origin image: the extension window opens with the localized "access not allowed" text (no content script exists yet). Block or break an image download after injection: the in-page popup shows the localized error instead of "Checking…". Then check an image on a restricted page (e.g. the Web Store) with that result window still open: it switches to the checking view instead of keeping the old permission error.
+20. M2: decline the permission prompt on a cross-origin image: the extension window opens with the localized "access not allowed" text (no content script exists yet). Block or break an image download after injection: a toast shows the localized error and the spinner is cleared (every terminal outcome except a TÄ result shows the popup, PLAN §5). Then check an image on a restricted page (e.g. the Web Store) with that result window still open: it switches to the checking view instead of keeping the old permission error.
 21. M2: right-click an image inside a cross-origin iframe (including a `data:` image there): the permission prompt appears once, then the in-page popup shows in that frame.
 22. M2: decline-then-allow cycle: after granting `<all_urls>` once, a second cross-origin image click shows no second prompt (measures the "request resolves true silently when already granted" claim).
-23. M2: click the TÄ badge after dismissing the result popup: headline, claimed issuer (a name, not a literal `$1`) and the "no signal does not mean human-made" caveat all reappear.
+23. M2 (#13): click the TÄ badge on a flagged image: the popup opens with the headline, the claimed issuer (a name, not a literal `$1`) and the "no signal does not mean human-made" caveat. An AI-signal result does not open the popup by itself (PLAN §5) — the badge is the only way in.
 24. M2: start a check on a slow image, then check another: the first result never replaces the second popup.
 25. M2: an image flagged earlier whose recheck is `incomplete` keeps its TÄ badge; a recheck that finds no signal removes it.
 19. M1: when the result window is the fallback, repeated menu clicks focus the one window instead of opening more.
@@ -431,6 +431,14 @@ An AI signal **with** a caveat (TÄ, but the popup must qualify it):
 30. M4 (#11, needs #13's popup button): with a key set, a second OpenAI check of the same image in the same session returns the stored result and does not upload again (no second confirmation window).
 31. M4 (#11, needs #13): closing the confirmation window with the window's own close button declines it (no upload), the same as Cancel.
 32. M4 (#11, needs #13): a `data:` image (a page that embeds the bytes) is uploaded from the page's own copy rather than the payload-free cached URL, so the check ends with an OpenAI result instead of an error.
+33. M5 (#13): `ai-test-halloween.png` and `ai-gemini-bunny.jpg` (a C2PA AI manifest) show "AI signal found" and the popup (opened by clicking the badge) with the C2PA line "Present and claims an AI-generated image." plus the claimed issuer and model, the XMP line, the SynthID line "Not checked." and the "Check with OpenAI" button, the "No signal does not mean the image is human-made." caveat, and no "real", "fake", "verified human" or "authentic" wording anywhere.
+34. M5 (#13): `ai-microsoft-bunny.jpg` (profile failure) shows the C2PA line "Verified, but the signer certificate is not in the C2PA profile." with claimed issuer "Microsoft Corporation" and still TÄ; a tampered copy built by `test/helpers/images.ts` shows "Present but did not verify; the image may have been edited." with no TÄ; the remote-manifest helper PNG shows "Stored elsewhere, not downloaded." with headline "Check incomplete".
+35. M5 (#13): `ai-tes-iceland.jpg` (nothing found) shows the toast "No AI signal found. This does not prove the image is human-made." and an automatically opened popup with all three lines reporting nothing found; `ai-meta-bunny.jpg` shows the XMP line claiming AI generation with its `DigitalSourceType` while the C2PA line reports that none was found.
+36. M5 (#13, no key): with no key saved, the popup's "Check with OpenAI" button is disabled and the reason "No API key saved. Add one in the extension's options." appears next to it.
+37. M5 (#13, with key): clicking "Check with OpenAI" opens the confirmation window (item 10); after Upload the popup updates — the SynthID line shows the result, the button is gone, and the note "OpenAI detects only OpenAI signals." is present. After an AI result (halloween, or the re-saved JPEG) the badge appears and clicking it reopens the popup with the OpenAI line visible (item 12). Clicking the button again while a check is in flight does nothing (no second window, no second upload).
+38. M5 (#13): during a check a small spinner appears over the image corner and follows the image on scroll, resize and reconnect; a no-signal check also shows the toast; an image whose host blocks the download shows a localized error toast and leaves no spinner behind.
+39. M5 (#13): interrupt a check — `brave://extensions` → the extension card → "service worker" → stop the worker while a check is in flight (or block the image host so it never answers) — and the toast "Check interrupted, try again." appears about 60 s after "checking".
+40. M5 (#13): Esc and an outside click close the new popup (which extends item 13), and a page script dispatching synthetic click, mousedown or Escape events neither opens the popup nor clicks the "Check with OpenAI" button (which extends item 17).
 
 ---
 
@@ -473,6 +481,7 @@ An AI signal **with** a caveat (TÄ, but the popup must qualify it):
 **M5. Result UI**
 - Final popup layout with three lines, three headlines and caveats; toasts; interrupted-check message.
 - Accept: every row of the TÄ rule renders sensibly; the re-saved JPEG shows "No AI signal found" locally and TÄ after the OpenAI check.
+- **Implemented in #13 (no longer a placeholder popup):** the layout is rendered from a pure `popupModel(result, availability)`. Per PLAN §5 an AI-signal result shows only the badge (the popup opens on click), a no-signal result shows the toast and the popup, an incomplete result shows the popup, and a failure shows only a toast; §8 items 15, 20 and 23 were reworded for that change, and items 33–40 are the new manual checks. The acceptance criterion above is **unverified** until the owner runs them.
 
 **M6. i18n and polish**
 - Finnish and English string review, tooltips, icons for the extension, error wording review, a11y (aria-labels, focus handling, contrast).
