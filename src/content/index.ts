@@ -5,7 +5,7 @@
 // manifest content_scripts entry (hard rule 1).
 
 import { badgeAction, isBadgeVisible } from "./badge";
-import { findImages, rememberDataUrl } from "./findImages";
+import { findImages, rememberDataUrl, srcUrlToMatch } from "./findImages";
 import { installOnce } from "./installOnce";
 import { createSpinner, renderPopup, showToast, type PopupHandle } from "./popup";
 import { popupModel, type PopupModel } from "./popupModel";
@@ -247,13 +247,16 @@ function createShell(): ContentShell {
     if (!isCheckUpdate(update)) return;
     rememberSrcUrl(update.checkId, update.srcUrl);
     if (isStaleUpdate(activeCheckId, update)) return;
+    // The worker's OpenAI done update repeats a data: srcUrl without its payload;
+    // the full URL the check saw is what the page's <img> actually carries.
+    const matchUrl = srcUrlToMatch(update.srcUrl, checkedSrcUrls.get(update.checkId));
     closePopup();
     clearSpinners();
 
     if (update.status === "checking") {
       activeCheckId = update.checkId;
       startInterruptionTimer(update.checkId);
-      const images = findImages(update.srcUrl);
+      const images = findImages(matchUrl);
       // No element carries this URL (a CSS background, a <picture> edge case):
       // there is nowhere to put a spinner, so the corner popup stands in.
       if (images.length === 0) showChecking();
@@ -266,11 +269,11 @@ function createShell(): ContentShell {
       showToast(shadow, message(errorMessageKey(update.error.code)));
       return;
     }
-    showDone(update);
+    showDone(update, matchUrl);
   }
 
-  function showDone(update: DoneUpdate): void {
-    const images = findImages(update.srcUrl);
+  function showDone(update: DoneUpdate, matchUrl: string): void {
+    const images = findImages(matchUrl);
     const action = badgeAction(update);
     if (action !== "keep") {
       for (const img of images) {

@@ -8,6 +8,7 @@ import {
   matchedSrcPrefix,
   matchesSrcUrl,
   rememberDataUrl,
+  srcUrlToMatch,
 } from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
 import { isBadgeVisible, shouldBadge } from "../src/content/badge";
@@ -203,6 +204,24 @@ describe("the data: source to read", () => {
     expect(dataUrlToRead("data:image/png;base64,", "data:image/png;base64,", root)).toBe("data:image/png;base64,AAAA");
     // Nothing on the page matches at all.
     expect(dataUrlToRead("data:image/png;base64,", undefined, { querySelectorAll: () => [] } as unknown as ParentNode)).toBeUndefined();
+  });
+});
+
+describe("the URL to match images against", () => {
+  // The worker's OpenAI done update repeats a data: srcUrl without its payload
+  // (PLAN §3), and no <img> carries that form, so the badge would never find the
+  // image on that update. The full URL the check saw is matched instead.
+  test("replaces a payload-free data: URL with the full one the check saw", () => {
+    expect(srcUrlToMatch("data:image/png;base64,", "data:image/png;base64,AAAA")).toBe("data:image/png;base64,AAAA");
+  });
+
+  test("keeps the update's own URL when nothing better is remembered", () => {
+    expect(srcUrlToMatch("data:image/png;base64,", undefined)).toBe("data:image/png;base64,");
+    expect(srcUrlToMatch("https://cdn.example/a.png", undefined)).toBe("https://cdn.example/a.png");
+    // An equal-length remembered URL is the payload-free repeat, not the image.
+    expect(srcUrlToMatch("data:image/png;base64,", "data:image/png;base64,")).toBe("data:image/png;base64,");
+    // A remembered URL that does not extend the stored one is a different image.
+    expect(srcUrlToMatch("data:image/png;base64,", "data:image/jpeg;base64,AAAA")).toBe("data:image/png;base64,");
   });
 });
 
