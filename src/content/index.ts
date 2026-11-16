@@ -7,12 +7,15 @@
 import { badgeAction, isBadgeVisible } from "./badge";
 import { findImages, rememberDataUrl } from "./findImages";
 import { installOnce } from "./installOnce";
-import { DISMISS_ID, isStaleUpdate, verdictPresentation } from "./presentation";
+import { createSpinner, renderPopup, showToast, type PopupHandle } from "./popup";
+import { popupModel, type PopupModel } from "./popupModel";
+import { DISMISS_ID, isStaleUpdate } from "./presentation";
 import { readBlobInPage } from "./readBlob";
 import { errorMessageKey } from "../shared/errors";
 import { message } from "../shared/i18n";
-import { isCheckUpdate, isDismissPopup, isReadBlob } from "../shared/types";
-import type { CheckUpdate, ReadBlobReply } from "../shared/types";
+import { openAiErrorMessage } from "../shared/openaiErrors";
+import { isCheckUpdate, isDismissPopup, isOpenAiRequestReply, isReadBlob } from "../shared/types";
+import type { CheckUpdate, OpenAiRequest, ReadBlobReply } from "../shared/types";
 
 // The idempotently-installed UI instance; the shape is local to the shell.
 export interface ContentShell {
@@ -20,6 +23,11 @@ export interface ContentShell {
 }
 
 const INSTANCE_KEY = "isthisai.contentShell";
+
+// The worker can be stopped mid-check (MV3, PLAN §4 step 9); the page-side
+// timer is the only thing that can notice.
+export const INTERRUPTION_MS = 60_000;
+
 // Inline !important beats page rules like `div { transform: … }`, which would
 // otherwise turn the host into the containing block of the fixed children.
 const HOST_RESET: ReadonlyArray<readonly [string, string]> = [
@@ -40,6 +48,14 @@ const BASE_STYLE = `
     font: 700 12px/1 system-ui, sans-serif;
     padding: 3px 5px; border-radius: 4px; cursor: pointer;
   }
+  .isthisai-spinner {
+    position: fixed; z-index: 2147483647;
+    box-sizing: border-box; width: 18px; height: 18px; border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.7); border-top-color: #7c3aed;
+    background: rgba(0, 0, 0, 0.3);
+    animation: isthisai-spin 0.8s linear infinite;
+  }
+  @keyframes isthisai-spin { to { transform: rotate(360deg); } }
   .isthisai-popup {
     position: fixed; z-index: 2147483647;
     right: 16px; top: 16px; max-width: 320px;
@@ -49,11 +65,18 @@ const BASE_STYLE = `
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   }
   .isthisai-popup h1 { font-size: 14px; margin: 0 0 4px; }
-  .isthisai-popup p { margin: 0; }`;
-
-interface PopupHandle {
-  close(): void;
-}
+  .isthisai-popup p { margin: 0; }
+  .isthisai-popup .isthisai-line { margin-top: 6px; }
+  .isthisai-popup .isthisai-line strong { display: block; }
+  .isthisai-popup .isthisai-note { margin-top: 8px; color: #444; }
+  .isthisai-popup button { margin-top: 8px; }
+  .isthisai-toast {
+    position: fixed; z-index: 2147483647;
+    left: 16px; bottom: 16px; max-width: 360px;
+    background: #111; color: #fff; border-radius: 6px; padding: 10px 14px;
+    font: 13px/1.4 system-ui, sans-serif;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  }`;
 
 function createShell(): ContentShell {
   const host = document.createElement("div");
@@ -65,7 +88,10 @@ function createShell(): ContentShell {
   document.documentElement.appendChild(host);
 
   let popup: PopupHandle | undefined;
+  let interruptedTimer: ReturnType<typeof setTimeout> | undefined;
+  let openAiInFlight = false;
   const badges = new Map<HTMLImageElement, HTMLDivElement>();
+  const spinners = new Map<HTMLImageElement, HTMLDivElement>();
   // The data: image each recent check was about. A data: image is the only case
   // the OpenAI flow cannot re-fetch on its own: the check record stores its URL
   // without the payload (PLAN §3), so the page supplies the real one rather than
@@ -77,83 +103,97 @@ function createShell(): ContentShell {
 
   type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
 
-  function showResult(update: DoneUpdate): void {
-    const { headlineKey, detailKey } = verdictPresentation(update.result.verdict);
-    const issuer = update.result.localC2pa.claimedIssuer;
-    const detail = detailKey
-      ? message(detailKey)
-      : issuer
-        ? message("popup_detail_claimed_issuer", [issuer])
-        : undefined;
-    popup = showPopup(headlineKey, "popup_caveat_no_signal", detail);
-  }
-
   function closePopup(): void {
     popup?.close();
     popup = undefined;
   }
 
-  function showPopup(headlineKey: string, caveatKey?: string, detail?: string): PopupHandle {
-    const overlay = document.createElement("div");
-    overlay.className = "isthisai-popup";
-    const headline = document.createElement("h1");
-    headline.textContent = message(headlineKey);
-    overlay.appendChild(headline);
-    if (detail) {
-      const detailEl = document.createElement("p");
-      detailEl.textContent = detail;
-      overlay.appendChild(detailEl);
-    }
-    if (caveatKey) {
-      const caveat = document.createElement("p");
-      caveat.textContent = message(caveatKey);
-      overlay.appendChild(caveat);
-    }
-    shadow.appendChild(overlay);
-
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (!event.isTrusted) return;
-      if (event.key === "Escape") close();
-    };
-    // A closed shadow root retargets its events to the host, so any click
-    // whose target is not the host is an outside click.
-    const onOutside = (event: MouseEvent): void => {
-      if (!event.isTrusted) return;
-      if (event.target !== host) close();
-    };
-    const close = (): void => {
-      document.removeEventListener("keydown", onKeyDown, true);
-      document.removeEventListener("mousedown", onOutside, true);
-      overlay.remove();
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    document.addEventListener("mousedown", onOutside, true);
-    return { close };
+  // The OpenAI request is answered by the worker, whose own done update
+  // re-renders the popup with the result; only a failure needs words here. A
+  // second click while one is in flight is refused (PLAN §5).
+  function requestOpenAi(checkId: string, button: HTMLButtonElement): void {
+    if (openAiInFlight) return;
+    openAiInFlight = true;
+    button.disabled = true;
+    chrome.runtime
+      .sendMessage({ type: "openaiRequest", checkId } satisfies OpenAiRequest)
+      .then((reply: unknown) => {
+        if (isOpenAiRequestReply(reply) && reply.ok) return;
+        if (isOpenAiRequestReply(reply) && reply.ok === false) {
+          const { key, substitutions } = openAiErrorMessage(reply.error);
+          showToast(shadow, message(key, substitutions));
+          return;
+        }
+        // No reply at all: the worker never answered (stopped or reloaded).
+        showToast(shadow, message("error_openai_unusable_reply"));
+      })
+      .catch(() => showToast(shadow, message("error_openai_unusable_reply")))
+      .finally(() => {
+        openAiInFlight = false;
+        if (button.isConnected) button.disabled = false;
+      });
   }
 
-  function positionBadge(badge: HTMLDivElement, img: HTMLImageElement): void {
+  function showResult(update: DoneUpdate): void {
+    closePopup();
+    popup = renderPopup(shadow, host, popupModel(update.result, update.openai), (button) =>
+      requestOpenAi(update.checkId, button),
+    );
+  }
+
+  function showChecking(): void {
+    closePopup();
+    const model: PopupModel = {
+      headlineKey: "popup_headline_checking",
+      lines: [],
+      button: { state: "hidden" },
+      showOpenAiNote: false,
+      showConvertedNote: false,
+    };
+    popup = renderPopup(shadow, host, model, () => {});
+  }
+
+  function stopInterruptionTimer(): void {
+    if (interruptedTimer !== undefined) {
+      clearTimeout(interruptedTimer);
+      interruptedTimer = undefined;
+    }
+  }
+
+  function startInterruptionTimer(checkId: string): void {
+    stopInterruptionTimer();
+    interruptedTimer = setTimeout(() => {
+      interruptedTimer = undefined;
+      if (activeCheckId !== checkId) return;
+      showToast(shadow, message("toast_interrupted"));
+    }, INTERRUPTION_MS);
+  }
+
+  function positionOverlay(element: HTMLElement, img: HTMLImageElement): void {
     const rect = img.getBoundingClientRect();
     const viewport = { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight };
-    badge.style.display = isBadgeVisible(rect, viewport, img.isConnected) ? "" : "none";
-    badge.style.top = `${Math.max(4, rect.top + 4)}px`;
-    badge.style.left = `${Math.max(4, rect.right - badge.offsetWidth - 4)}px`;
+    element.style.display = isBadgeVisible(rect, viewport, img.isConnected) ? "" : "none";
+    element.style.top = `${Math.max(4, rect.top + 4)}px`;
+    element.style.left = `${Math.max(4, rect.right - element.offsetWidth - 4)}px`;
   }
 
-  function repositionBadges(): void {
-    for (const [img, badge] of badges) {
-      if (!img.isConnected) {
-        badge.remove();
-        badges.delete(img);
-      } else {
-        positionBadge(badge, img);
+  function repositionOverlays(): void {
+    for (const overlays of [badges, spinners]) {
+      for (const [img, element] of overlays) {
+        if (!img.isConnected) {
+          element.remove();
+          overlays.delete(img);
+        } else {
+          positionOverlay(element, img);
+        }
       }
     }
   }
 
-  // Badges use fixed positioning; keep them on their images while the page
+  // Overlays use fixed positioning; keep them on their images while the page
   // scrolls (any scrollable element) or the window resizes.
-  window.addEventListener("scroll", repositionBadges, { capture: true });
-  window.addEventListener("resize", repositionBadges);
+  window.addEventListener("scroll", repositionOverlays, { capture: true });
+  window.addEventListener("resize", repositionOverlays);
 
   function addBadge(img: HTMLImageElement, update: DoneUpdate): void {
     badges.get(img)?.remove();
@@ -167,7 +207,7 @@ function createShell(): ContentShell {
       showResult(update);
     });
     shadow.appendChild(badge);
-    positionBadge(badge, img);
+    positionOverlay(badge, img);
     badges.set(img, badge);
   }
 
@@ -176,12 +216,27 @@ function createShell(): ContentShell {
     badges.delete(img);
   }
 
+  function addSpinner(img: HTMLImageElement): void {
+    spinners.get(img)?.remove();
+    const spinner = createSpinner();
+    shadow.appendChild(spinner);
+    positionOverlay(spinner, img);
+    spinners.set(img, spinner);
+  }
+
+  function clearSpinners(): void {
+    for (const spinner of spinners.values()) spinner.remove();
+    spinners.clear();
+  }
+
   function handleMessage(message: unknown): void {
     if (isDismissPopup(message)) {
       // A newer check started elsewhere in the tab: this frame is invalidated
       // (terminal updates of its own in-flight check must not reopen a popup),
       // not reset to the fresh-shell state.
       activeCheckId = DISMISS_ID;
+      stopInterruptionTimer();
+      clearSpinners();
       closePopup();
     } else {
       handleCheckUpdate(message);
@@ -193,23 +248,50 @@ function createShell(): ContentShell {
     rememberSrcUrl(update.checkId, update.srcUrl);
     if (isStaleUpdate(activeCheckId, update)) return;
     closePopup();
+    clearSpinners();
+
+    if (update.status === "checking") {
+      activeCheckId = update.checkId;
+      startInterruptionTimer(update.checkId);
+      const images = findImages(update.srcUrl);
+      // No element carries this URL (a CSS background, a <picture> edge case):
+      // there is nowhere to put a spinner, so the corner popup stands in.
+      if (images.length === 0) showChecking();
+      else for (const img of images) addSpinner(img);
+      return;
+    }
+
+    stopInterruptionTimer();
     if (update.status === "failed") {
-      popup = showPopup(errorMessageKey(update.error.code));
+      showToast(shadow, message(errorMessageKey(update.error.code)));
       return;
     }
-    if (update.status === "done") {
-      showResult(update);
-      const action = badgeAction(update);
-      if (action !== "keep") {
-        for (const img of findImages(update.srcUrl)) {
-          if (action === "add") addBadge(img, update);
-          else removeBadge(img);
-        }
+    showDone(update);
+  }
+
+  function showDone(update: DoneUpdate): void {
+    const images = findImages(update.srcUrl);
+    const action = badgeAction(update);
+    if (action !== "keep") {
+      for (const img of images) {
+        if (action === "add") addBadge(img, update);
+        else removeBadge(img);
       }
-      return;
     }
-    activeCheckId = update.checkId;
-    popup = showPopup("popup_headline_checking", "popup_caveat_no_signal");
+    switch (update.result.verdict) {
+      case "ai_signal":
+        // Badge only; clicking it opens the popup. Without a matched element
+        // there is nothing to click, so the popup stands in (PLAN §5).
+        if (images.length === 0) showResult(update);
+        return;
+      case "no_signal":
+        showToast(shadow, message("toast_no_signal"));
+        showResult(update);
+        return;
+      case "incomplete":
+        showResult(update);
+        return;
+    }
   }
 
   // Registered inside the factory so a second injection reuses the whole
