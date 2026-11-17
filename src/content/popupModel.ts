@@ -100,11 +100,19 @@ function synthidLine(openai: OpenAiResultPart): PopupLine {
 }
 
 // OpenAI's own C2PA result gets its own line: a third-party manifest can come
-// back "trusted", which must not read as OpenAI vouching for it (PLAN §5).
+// back "trusted", which must not read as OpenAI vouching for it. The outcome
+// ("detected") says only whether OpenAI saw its own signal; a manifest can be
+// described without one (validation `trusted`/`valid` plus an issuer, as the
+// Google-signed file comes back), while `not_present` means there is none
+// (PLAN §2, §5).
 function openAiC2paLine(c2pa: Extract<OpenAiResultPart, { state: "done" }>["c2pa"]): PopupLine {
   const labelKey = "popup_line_openai_c2pa";
-  if (c2pa.outcome !== "detected") return { labelKey, parts: [{ key: "popup_openai_c2pa_not_detected" }] };
-  const parts: MessagePart[] = [{ key: "popup_openai_c2pa_detected" }];
+  const described =
+    c2pa.outcome === "detected" || c2pa.issuer !== undefined || (c2pa.validation !== undefined && c2pa.validation !== "not_present");
+  if (!described) return { labelKey, parts: [{ key: "popup_openai_c2pa_not_detected" }] };
+  const parts: MessagePart[] = [
+    { key: c2pa.outcome === "detected" ? "popup_openai_c2pa_detected" : "popup_openai_c2pa_described" },
+  ];
   if (c2pa.validation !== undefined) parts.push({ key: `popup_openai_c2pa_validation_${c2pa.validation}` });
   parts.push(...claimed(c2pa.issuer, c2pa.model));
   return { labelKey, parts };

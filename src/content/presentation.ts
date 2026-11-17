@@ -5,12 +5,15 @@ import type { CheckResult, CheckUpdate } from "../shared/types";
 // newer check's. Only a new "checking" update reopens this frame.
 export const DISMISS_ID = "__dismissed__";
 
-// A done/failed update for a check other than the active one must not replace
-// the newer check's popup. "checking" always starts a new active check.
-export function isStaleUpdate(activeCheckId: string | undefined, update: CheckUpdate): boolean {
+// A done/failed update for a check other than the one this frame follows must
+// not replace the newer check's popup. "checking" always starts a new followed
+// check. The shell also follows a check whose result the user opens from a
+// badge: an OpenAI upload is slow enough for another image to be checked in
+// between, and its completion has to reach the popup on screen.
+export function isStaleUpdate(followedCheckId: string | undefined, update: CheckUpdate): boolean {
   if (update.status === "checking") return false;
-  if (activeCheckId === DISMISS_ID) return true;
-  return activeCheckId !== undefined && activeCheckId !== update.checkId;
+  if (followedCheckId === DISMISS_ID) return true;
+  return followedCheckId !== undefined && followedCheckId !== update.checkId;
 }
 
 // "incomplete" must never read as "No AI signal found" (hard rule 8: the

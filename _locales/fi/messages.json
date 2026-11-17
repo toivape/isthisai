@@ -237,7 +237,10 @@
     "message": "Content Credentials (OpenAI:n kautta)"
   },
   "popup_openai_c2pa_detected": {
-    "message": "Content Credentials -merkintä löytyi."
+    "message": "Content Credentials -merkintä löytyi, ja siinä on tekoälyn merkki."
+  },
+  "popup_openai_c2pa_described": {
+    "message": "Content Credentials -merkintä löytyi, mutta siinä ei ole tekoälyn merkkiä."
   },
   "popup_openai_c2pa_not_detected": {
     "message": "Content Credentials -merkintää ei löytynyt."

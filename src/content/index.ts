@@ -59,6 +59,10 @@ const BASE_STYLE = `
   .isthisai-popup {
     position: fixed; z-index: 2147483647;
     right: 16px; top: 16px; max-width: 320px;
+    /* A fixed box below the fold cannot be scrolled into view, so the popup
+       itself scrolls: in a short iframe the button and caveat must stay
+       reachable. */
+    box-sizing: border-box; max-height: calc(100vh - 32px); overflow-y: auto;
     background: #fff; color: #111; border: 1px solid #ccc;
     border-radius: 8px; padding: 12px 16px;
     font: 13px/1.4 system-ui, sans-serif;
@@ -99,7 +103,7 @@ function createShell(): ContentShell {
   const checkedSrcUrls = new Map<string, string>();
   const rememberSrcUrl = (checkId: string, srcUrl: string): void => rememberDataUrl(checkedSrcUrls, checkId, srcUrl);
 
-  let activeCheckId: string | undefined;
+  let followedCheckId: string | undefined;
 
   type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
 
@@ -135,6 +139,11 @@ function createShell(): ContentShell {
   }
 
   function showResult(update: DoneUpdate): void {
+    // The user is looking at this check now, so its updates are applied even if
+    // a newer check was started here in the meantime. An OpenAI upload is slow
+    // enough for that to happen, and its completion must not be dropped as
+    // stale (it would leave the popup and badge on the pre-upload result).
+    followedCheckId = update.checkId;
     closePopup();
     popup = renderPopup(shadow, host, popupModel(update.result, update.openai), (button) =>
       requestOpenAi(update.checkId, button),
@@ -164,7 +173,12 @@ function createShell(): ContentShell {
     stopInterruptionTimer();
     interruptedTimer = setTimeout(() => {
       interruptedTimer = undefined;
-      if (activeCheckId !== checkId) return;
+      if (followedCheckId !== checkId) return;
+      // No terminal update will come, so the check is over as far as the page
+      // is concerned: drop the spinner and the "checking" popup, or they would
+      // animate forever beside the toast.
+      clearSpinners();
+      closePopup();
       showToast(shadow, message("toast_interrupted"));
     }, INTERRUPTION_MS);
   }
@@ -234,7 +248,7 @@ function createShell(): ContentShell {
       // A newer check started elsewhere in the tab: this frame is invalidated
       // (terminal updates of its own in-flight check must not reopen a popup),
       // not reset to the fresh-shell state.
-      activeCheckId = DISMISS_ID;
+      followedCheckId = DISMISS_ID;
       stopInterruptionTimer();
       clearSpinners();
       closePopup();
@@ -246,7 +260,7 @@ function createShell(): ContentShell {
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
     rememberSrcUrl(update.checkId, update.srcUrl);
-    if (isStaleUpdate(activeCheckId, update)) return;
+    if (isStaleUpdate(followedCheckId, update)) return;
     // The worker's OpenAI done update repeats a data: srcUrl without its payload;
     // the full URL the check saw is what the page's <img> actually carries.
     const matchUrl = srcUrlToMatch(update.srcUrl, checkedSrcUrls.get(update.checkId));
@@ -254,7 +268,7 @@ function createShell(): ContentShell {
     clearSpinners();
 
     if (update.status === "checking") {
-      activeCheckId = update.checkId;
+      followedCheckId = update.checkId;
       startInterruptionTimer(update.checkId);
       const images = findImages(matchUrl);
       // No element carries this URL (a CSS background, a <picture> edge case):

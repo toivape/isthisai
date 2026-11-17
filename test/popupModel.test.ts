@@ -247,7 +247,7 @@ describe("the OpenAI C2PA line", () => {
 
   test("every validation state has its own wording", () => {
     for (const validation of ["trusted", "valid", "invalid", "not_present"] as const) {
-      const model = popupModel(result({ openai: openAiDone({ outcome: "detected", validation }) }), available);
+      const model = popupModel(result({ openai: openAiDone({ outcome: "detected", validation, issuer: "Adobe Inc." }) }), available);
       expect(line(model, "popup_line_openai_c2pa").parts[1]).toEqual({
         key: `popup_openai_c2pa_validation_${validation}`,
       });
@@ -266,12 +266,52 @@ describe("the OpenAI C2PA line", () => {
     expect(line(model, "popup_line_openai_c2pa").parts).toEqual([{ key: "popup_openai_c2pa_detected" }]);
   });
 
-  test("never reads as OpenAI vouching for the manifest", () => {
-    // A third-party manifest comes back trusted (a Google-signed file), so a
-    // word like "verified by OpenAI" would read as OpenAI vouching for another
-    // vendor's image (hard rule 8, PLAN §5).
+  test("a third-party manifest with no OpenAI signal keeps its validation and issuer", () => {
+    // The measured shape of a Google-signed file (PLAN §2): `not_detected` while
+    // the manifest is still described. Reporting "no manifest found" here would
+    // throw away what the API said.
     const model = popupModel(
-      result({ openai: openAiDone({ outcome: "detected", validation: "trusted", issuer: "Google LLC" }) }),
+      result({ openai: openAiDone({ outcome: "not_detected", validation: "trusted", issuer: "Google LLC" }) }),
+      available,
+    );
+    expect(line(model, "popup_line_openai_c2pa").parts).toEqual([
+      { key: "popup_openai_c2pa_described" },
+      { key: "popup_openai_c2pa_validation_trusted" },
+      { key: "popup_claimed_issuer", substitutions: ["Google LLC"] },
+    ]);
+  });
+
+  test("no manifest at all is reported as such, not as one without a signal", () => {
+    // A phone photo comes back `not_detected` with validation `not_present`
+    // (PLAN §2), which is the absence of a manifest, not a described one.
+    const model = popupModel(result({ openai: openAiDone({ outcome: "not_detected", validation: "not_present" }) }), available);
+    expect(line(model, "popup_line_openai_c2pa").parts).toEqual([{ key: "popup_openai_c2pa_not_detected" }]);
+  });
+
+  test("a described manifest without an issuer is still reported", () => {
+    // The parser drops a null validation_state and a null issuer (openai.ts),
+    // so either detail alone must be enough to keep the manifest described.
+    const model = popupModel(result({ openai: openAiDone({ outcome: "not_detected", validation: "valid" }) }), available);
+    expect(line(model, "popup_line_openai_c2pa").parts).toEqual([
+      { key: "popup_openai_c2pa_described" },
+      { key: "popup_openai_c2pa_validation_valid" },
+    ]);
+  });
+
+  test("a named issuer alone is enough to report a manifest", () => {
+    const model = popupModel(result({ openai: openAiDone({ outcome: "not_detected", issuer: "Adobe Inc." }) }), available);
+    expect(line(model, "popup_line_openai_c2pa").parts).toEqual([
+      { key: "popup_openai_c2pa_described" },
+      { key: "popup_claimed_issuer", substitutions: ["Adobe Inc."] },
+    ]);
+  });
+
+  test("never reads as a verification of the manifest", () => {
+    // A third-party manifest comes back trusted (a Google-signed file), so a
+    // word like "verified" would read as the extension vouching for it (hard
+    // rule 8, PLAN §5).
+    const model = popupModel(
+      result({ openai: openAiDone({ outcome: "not_detected", validation: "trusted", issuer: "Google LLC" }) }),
       available,
     );
     const messages = JSON.parse(readFileSync("_locales/en/messages.json", "utf8")) as Record<string, { message: string }>;
@@ -285,8 +325,9 @@ describe("the OpenAI C2PA line", () => {
       })
       .join(" ");
     expect(rendered).toMatch(/Google LLC/);
+    expect(rendered).toMatch(/trusted/);
     expect(rendered).not.toMatch(/verif/i);
-    expect(rendered).not.toMatch(/OpenAI/);
+    expect(rendered).not.toMatch(/authentic/i);
   });
 });
 
@@ -310,6 +351,10 @@ describe("every key the model can emit", () => {
     popupModel(result({ localXmp: { state: "detected", digitalSourceType: "d", generatorHint: "g" } }), available),
     popupModel(result({ localXmp: { state: "error" } }), available),
     popupModel(result({ openai: openAiDone({ outcome: "detected", validation: "trusted", issuer: "i", model: "m" }, { outcome: "detected", model: "s" }, true) }), noKey),
+    popupModel(result({ openai: openAiDone({ outcome: "not_detected", validation: "valid", issuer: "i" }) }), available),
+    ...(["trusted", "valid", "invalid", "not_present"] as const).map((validation) =>
+      popupModel(result({ openai: openAiDone({ outcome: "detected", validation, issuer: "i" }) }), available),
+    ),
   ];
 
   test("names a message both locales define", () => {
