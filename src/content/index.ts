@@ -92,6 +92,7 @@ function createShell(): ContentShell {
   document.documentElement.appendChild(host);
 
   let popup: PopupHandle | undefined;
+  let checkingPopupOpen = false;
   let interruptedTimer: ReturnType<typeof setTimeout> | undefined;
   let openAiInFlight = false;
   const badges = new Map<HTMLImageElement, HTMLDivElement>();
@@ -104,13 +105,14 @@ function createShell(): ContentShell {
   const rememberSrcUrl = (checkId: string, srcUrl: string): void => rememberDataUrl(checkedSrcUrls, checkId, srcUrl);
 
   let followedCheckId: string | undefined;
-  let openedCheckId: string | undefined;
+  let requestedCheckId: string | undefined;
 
   type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
 
   function closePopup(): void {
     popup?.close();
     popup = undefined;
+    checkingPopupOpen = false;
   }
 
   // The OpenAI request is answered by the worker, whose own done update
@@ -119,6 +121,10 @@ function createShell(): ContentShell {
   function requestOpenAi(checkId: string, button: HTMLButtonElement): void {
     if (openAiInFlight) return;
     openAiInFlight = true;
+    // An upload is slow enough for another check to run meanwhile; its
+    // completion must still reach this check's popup and badge. Set here, not
+    // on render, so a later popup for another check cannot overwrite it.
+    requestedCheckId = checkId;
     button.disabled = true;
     chrome.runtime
       .sendMessage({ type: "openaiRequest", checkId } satisfies OpenAiRequest)
@@ -140,11 +146,6 @@ function createShell(): ContentShell {
   }
 
   function showResult(update: DoneUpdate): void {
-    // The user is looking at this check now, so its updates are applied even if
-    // a newer check was started here in the meantime (an OpenAI upload is slow
-    // enough for that). The running check stays followed, so its own result and
-    // spinner handling are untouched.
-    openedCheckId = update.checkId;
     closePopup();
     popup = renderPopup(shadow, host, popupModel(update.result, update.openai), (button) =>
       requestOpenAi(update.checkId, button),
@@ -161,6 +162,7 @@ function createShell(): ContentShell {
       showConvertedNote: false,
     };
     popup = renderPopup(shadow, host, model, () => {});
+    checkingPopupOpen = true;
   }
 
   function stopInterruptionTimer(): void {
@@ -179,7 +181,7 @@ function createShell(): ContentShell {
       // is concerned: drop the spinner and the "checking" popup, or they would
       // animate forever beside the toast.
       clearSpinners();
-      closePopup();
+      if (checkingPopupOpen) closePopup();
       showToast(shadow, message("toast_interrupted"));
     }, INTERRUPTION_MS);
   }
@@ -250,7 +252,7 @@ function createShell(): ContentShell {
       // (terminal updates of its own in-flight check must not reopen a popup),
       // not reset to the fresh-shell state.
       followedCheckId = DISMISS_ID;
-      openedCheckId = undefined;
+      requestedCheckId = undefined;
       stopInterruptionTimer();
       clearSpinners();
       closePopup();
@@ -262,7 +264,7 @@ function createShell(): ContentShell {
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
     rememberSrcUrl(update.checkId, update.srcUrl);
-    if (isStaleUpdate(followedCheckId, update, openedCheckId)) return;
+    if (isStaleUpdate(followedCheckId, update, requestedCheckId)) return;
     // The worker's OpenAI done update repeats a data: srcUrl without its payload;
     // the full URL the check saw is what the page's <img> actually carries.
     const matchUrl = srcUrlToMatch(update.srcUrl, checkedSrcUrls.get(update.checkId));
@@ -273,7 +275,7 @@ function createShell(): ContentShell {
 
     if (update.status === "checking") {
       followedCheckId = update.checkId;
-      openedCheckId = undefined;
+      requestedCheckId = undefined;
       startInterruptionTimer(update.checkId);
       const images = findImages(matchUrl);
       // No element carries this URL (a CSS background, a <picture> edge case):
