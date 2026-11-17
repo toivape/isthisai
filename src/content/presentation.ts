@@ -7,11 +7,16 @@ export const DISMISS_ID = "__dismissed__";
 
 // A done/failed update for a check other than the one this frame follows must
 // not replace the newer check's popup. "checking" always starts a new followed
-// check. The shell also follows a check whose result the user opens from a
-// badge: an OpenAI upload is slow enough for another image to be checked in
-// between, and its completion has to reach the popup on screen.
-export function isStaleUpdate(followedCheckId: string | undefined, update: CheckUpdate): boolean {
+// check. A check whose result the user opened from a badge (openedCheckId) is
+// accepted too, without displacing the running one: an OpenAI upload is slow
+// enough for another image to be checked in between.
+export function isStaleUpdate(
+  followedCheckId: string | undefined,
+  update: CheckUpdate,
+  openedCheckId?: string,
+): boolean {
   if (update.status === "checking") return false;
+  if (openedCheckId === update.checkId) return false;
   if (followedCheckId === DISMISS_ID) return true;
   return followedCheckId !== undefined && followedCheckId !== update.checkId;
 }

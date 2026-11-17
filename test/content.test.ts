@@ -421,6 +421,27 @@ describe("isStaleUpdate", () => {
   });
 });
 
+describe("isStaleUpdate with an opened result", () => {
+  const update = (status: "checking" | "done" | "failed", checkId: string) =>
+    ({ type: "checkUpdate", checkId, srcUrl: "u", status }) as unknown as CheckUpdate;
+
+  test("the running check's result is not stale while another check's popup is open", () => {
+    expect(isStaleUpdate("b", update("done", "b"), "a")).toBe(false);
+  });
+
+  test("the opened check's completion is not stale while a newer check runs", () => {
+    expect(isStaleUpdate("b", update("done", "a"), "a")).toBe(false);
+  });
+
+  test("the opened check's completion is accepted in a dismissed frame", () => {
+    expect(isStaleUpdate(DISMISS_ID, update("done", "a"), "a")).toBe(false);
+  });
+
+  test("a check that is neither running nor opened is stale", () => {
+    expect(isStaleUpdate("b", update("done", "c"), "a")).toBe(true);
+  });
+});
+
 describe("dismissed frame rejects until a new check arrives", () => {
   const update = (status: "checking" | "done" | "failed", checkId: string) =>
     ({ type: "checkUpdate", checkId, srcUrl: "u", status }) as unknown as CheckUpdate;

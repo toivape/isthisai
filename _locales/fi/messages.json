@@ -186,7 +186,7 @@
     "message": "Merkintä on olemassa mutta ei vahvistunut; kuvaa on voitu muokata."
   },
   "popup_c2pa_profile": {
-    "message": "Vahvistettu, mutta allekirjoittajan varmenne ei ole C2PA-profiilissa."
+    "message": "Allekirjoitus vastaa tiedostoa, mutta allekirjoittajan varmenne ei ole C2PA-profiilissa."
   },
   "popup_c2pa_remote": {
     "message": "Säilytetään muualla, ei ladattu."

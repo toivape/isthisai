@@ -104,6 +104,7 @@ function createShell(): ContentShell {
   const rememberSrcUrl = (checkId: string, srcUrl: string): void => rememberDataUrl(checkedSrcUrls, checkId, srcUrl);
 
   let followedCheckId: string | undefined;
+  let openedCheckId: string | undefined;
 
   type DoneUpdate = Extract<CheckUpdate, { status: "done" }>;
 
@@ -140,10 +141,10 @@ function createShell(): ContentShell {
 
   function showResult(update: DoneUpdate): void {
     // The user is looking at this check now, so its updates are applied even if
-    // a newer check was started here in the meantime. An OpenAI upload is slow
-    // enough for that to happen, and its completion must not be dropped as
-    // stale (it would leave the popup and badge on the pre-upload result).
-    followedCheckId = update.checkId;
+    // a newer check was started here in the meantime (an OpenAI upload is slow
+    // enough for that). The running check stays followed, so its own result and
+    // spinner handling are untouched.
+    openedCheckId = update.checkId;
     closePopup();
     popup = renderPopup(shadow, host, popupModel(update.result, update.openai), (button) =>
       requestOpenAi(update.checkId, button),
@@ -249,6 +250,7 @@ function createShell(): ContentShell {
       // (terminal updates of its own in-flight check must not reopen a popup),
       // not reset to the fresh-shell state.
       followedCheckId = DISMISS_ID;
+      openedCheckId = undefined;
       stopInterruptionTimer();
       clearSpinners();
       closePopup();
@@ -260,15 +262,18 @@ function createShell(): ContentShell {
   function handleCheckUpdate(update: unknown): void {
     if (!isCheckUpdate(update)) return;
     rememberSrcUrl(update.checkId, update.srcUrl);
-    if (isStaleUpdate(followedCheckId, update)) return;
+    if (isStaleUpdate(followedCheckId, update, openedCheckId)) return;
     // The worker's OpenAI done update repeats a data: srcUrl without its payload;
     // the full URL the check saw is what the page's <img> actually carries.
     const matchUrl = srcUrlToMatch(update.srcUrl, checkedSrcUrls.get(update.checkId));
     closePopup();
-    clearSpinners();
+    // An opened check's completion must not touch the running check's spinner or timer.
+    const running = update.checkId === followedCheckId || update.status === "checking";
+    if (running) clearSpinners();
 
     if (update.status === "checking") {
       followedCheckId = update.checkId;
+      openedCheckId = undefined;
       startInterruptionTimer(update.checkId);
       const images = findImages(matchUrl);
       // No element carries this URL (a CSS background, a <picture> edge case):
@@ -278,7 +283,7 @@ function createShell(): ContentShell {
       return;
     }
 
-    stopInterruptionTimer();
+    if (running) stopInterruptionTimer();
     if (update.status === "failed") {
       showToast(shadow, message(errorMessageKey(update.error.code)));
       return;

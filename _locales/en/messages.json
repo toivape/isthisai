@@ -186,7 +186,7 @@
     "message": "Present but did not verify; the image may have been edited."
   },
   "popup_c2pa_profile": {
-    "message": "Verified, but the signer certificate is not in the C2PA profile."
+    "message": "The signature matches the file, but the signer certificate is not in the C2PA profile."
   },
   "popup_c2pa_remote": {
     "message": "Stored elsewhere, not downloaded."
