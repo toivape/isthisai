@@ -268,10 +268,14 @@ function createShell(): ContentShell {
     // The worker's OpenAI done update repeats a data: srcUrl without its payload;
     // the full URL the check saw is what the page's <img> actually carries.
     const matchUrl = srcUrlToMatch(update.srcUrl, checkedSrcUrls.get(update.checkId));
-    closePopup();
-    // An opened check's completion must not touch the running check's spinner or timer.
+    // An opened check's completion must not touch the running check's spinner or
+    // timer — or its placeholder popup, which is the only "checking" indicator
+    // for an image with no matching element. A result that renders closes it anyway.
     const running = update.checkId === followedCheckId || update.status === "checking";
-    if (running) clearSpinners();
+    if (running) {
+      clearSpinners();
+      closePopup();
+    }
 
     if (update.status === "checking") {
       followedCheckId = update.checkId;
