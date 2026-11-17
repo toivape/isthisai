@@ -5,7 +5,7 @@
 // manifest content_scripts entry (hard rule 1).
 
 import { badgeAction, isBadgeVisible } from "./badge";
-import { findImages, rememberDataUrl, srcUrlToMatch } from "./findImages";
+import { findImages, matchedSrcPrefix, rememberDataUrl, srcUrlToMatch } from "./findImages";
 import { installOnce } from "./installOnce";
 import { createSpinner, renderPopup, showToast, type PopupHandle } from "./popup";
 import { popupModel, type PopupModel } from "./popupModel";
@@ -218,6 +218,9 @@ function createShell(): ContentShell {
     badge.className = "isthisai-badge";
     badge.textContent = "TÄ";
     badge.title = message("badge_tooltip");
+    // Which check put this badge here, so a later update of the same check can
+    // refresh it even when its URL no longer matches anything (below).
+    badge.dataset.isthisaiCheck = update.checkId;
     badge.addEventListener("click", (event) => {
       if (!event.isTrusted) return;
       closePopup();
@@ -226,6 +229,21 @@ function createShell(): ContentShell {
     shadow.appendChild(badge);
     positionOverlay(badge, img);
     badges.set(img, badge);
+  }
+
+  // The elements this check already badged. A data: URL too large to remember,
+  // or one whose remembered entry was evicted, leaves an update whose srcUrl
+  // matches no element; the badge it placed earlier still identifies the image.
+  function badgedImagesFor(checkId: string, matchUrl: string): HTMLImageElement[] {
+    const found: HTMLImageElement[] = [];
+    for (const [img, badge] of badges) {
+      if (badge.dataset.isthisaiCheck !== checkId || !img.isConnected) continue;
+      // A source the page swapped in since the badge was placed must not take
+      // this result; the stored data: form is what the check was about.
+      if (matchUrl.startsWith("data:") && matchedSrcPrefix(img, matchUrl) === undefined) continue;
+      found.push(img);
+    }
+    return found;
   }
 
   function removeBadge(img: HTMLImageElement): void {
@@ -299,9 +317,13 @@ function createShell(): ContentShell {
 
   function showDone(update: DoneUpdate, matchUrl: string): void {
     const images = findImages(matchUrl);
+    // An unmatchable update (a data: URL that could not be remembered) still
+    // updates the badges this check already placed; otherwise the badge would
+    // keep the pre-upload result and the popup would stand in for it.
+    const targets = images.length > 0 ? images : badgedImagesFor(update.checkId, matchUrl);
     const action = badgeAction(update);
     if (action !== "keep") {
-      for (const img of images) {
+      for (const img of targets) {
         if (action === "add") addBadge(img, update);
         else removeBadge(img);
       }
@@ -310,7 +332,7 @@ function createShell(): ContentShell {
       case "ai_signal":
         // Badge only; clicking it opens the popup. Without a matched element
         // there is nothing to click, so the popup stands in (PLAN §5).
-        if (images.length === 0) showResult(update);
+        if (targets.length === 0) showResult(update);
         return;
       case "no_signal":
         showToast(shadow, message("toast_no_signal"));
