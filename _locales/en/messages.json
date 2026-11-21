@@ -140,9 +140,6 @@
   "popup_headline_no_signal": {
     "message": "No AI signal found"
   },
-  "popup_detail_claimed_issuer": {
-    "message": "Content Credentials from $1 (claimed, signer not verified)"
-  },
   "popup_caveat_no_signal": {
     "message": "No signal does not mean the image is human-made."
   },
@@ -172,5 +169,107 @@
   },
   "popup_detail_incomplete": {
     "message": "The image could not be fully checked, so no result can be given."
+  },
+  "popup_line_c2pa": {
+    "message": "Content Credentials (C2PA)"
+  },
+  "popup_c2pa_absent": {
+    "message": "No Content Credentials found."
+  },
+  "popup_c2pa_present_ai": {
+    "message": "Present and claims an AI-generated image."
+  },
+  "popup_c2pa_present_other": {
+    "message": "Present, but the claim is not about AI generation."
+  },
+  "popup_c2pa_unverified": {
+    "message": "Present but did not verify; the image may have been edited."
+  },
+  "popup_c2pa_profile": {
+    "message": "The signature matches the file, but the signer certificate is not in the C2PA profile."
+  },
+  "popup_c2pa_remote": {
+    "message": "Stored elsewhere, not downloaded."
+  },
+  "popup_c2pa_error": {
+    "message": "The Content Credentials could not be read."
+  },
+  "popup_claimed_issuer": {
+    "message": "Claimed issuer: $1"
+  },
+  "popup_claimed_model": {
+    "message": "Claimed model: $1"
+  },
+  "popup_line_xmp": {
+    "message": "Metadata (XMP, unsigned)"
+  },
+  "popup_xmp_detected": {
+    "message": "Metadata claims AI generation."
+  },
+  "popup_xmp_source_type": {
+    "message": "DigitalSourceType: $1"
+  },
+  "popup_xmp_generator": {
+    "message": "Generator hint: $1"
+  },
+  "popup_xmp_not_detected": {
+    "message": "No such metadata found."
+  },
+  "popup_xmp_error": {
+    "message": "The metadata could not be read."
+  },
+  "popup_line_synthid": {
+    "message": "Watermark (SynthID, via OpenAI)"
+  },
+  "popup_synthid_not_checked": {
+    "message": "Not checked."
+  },
+  "popup_synthid_detected": {
+    "message": "An AI watermark was detected."
+  },
+  "popup_synthid_not_detected": {
+    "message": "No AI watermark found."
+  },
+  "popup_synthid_converted": {
+    "message": "OpenAI received a copy the server converted; converting can remove signals."
+  },
+  "popup_line_openai_c2pa": {
+    "message": "Content Credentials (via OpenAI)"
+  },
+  "popup_openai_c2pa_detected": {
+    "message": "A Content Credentials manifest was found, with an AI signal."
+  },
+  "popup_openai_c2pa_described": {
+    "message": "A Content Credentials manifest was found, but with no AI signal."
+  },
+  "popup_openai_c2pa_not_detected": {
+    "message": "No Content Credentials manifest found."
+  },
+  "popup_openai_c2pa_validation_trusted": {
+    "message": "Validation: trusted"
+  },
+  "popup_openai_c2pa_validation_valid": {
+    "message": "Validation: valid"
+  },
+  "popup_openai_c2pa_validation_invalid": {
+    "message": "Validation: invalid"
+  },
+  "popup_openai_c2pa_validation_not_present": {
+    "message": "Validation: not present"
+  },
+  "popup_openai_note": {
+    "message": "OpenAI detects only OpenAI signals."
+  },
+  "popup_button_openai": {
+    "message": "Check with OpenAI"
+  },
+  "popup_button_no_key": {
+    "message": "No API key saved. Add one in the extension's options."
+  },
+  "toast_no_signal": {
+    "message": "No AI signal found. This does not prove the image is human-made."
+  },
+  "toast_interrupted": {
+    "message": "Check interrupted, try again."
   }
 }

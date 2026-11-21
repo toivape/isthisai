@@ -8,6 +8,7 @@ import {
   matchedSrcPrefix,
   matchesSrcUrl,
   rememberDataUrl,
+  srcUrlToMatch,
 } from "../src/content/findImages";
 import { installOnce } from "../src/content/installOnce";
 import { isBadgeVisible, shouldBadge } from "../src/content/badge";
@@ -206,6 +207,24 @@ describe("the data: source to read", () => {
   });
 });
 
+describe("the URL to match images against", () => {
+  // The worker's OpenAI done update repeats a data: srcUrl without its payload
+  // (PLAN §3), and no <img> carries that form, so the badge would never find the
+  // image on that update. The full URL the check saw is matched instead.
+  test("replaces a payload-free data: URL with the full one the check saw", () => {
+    expect(srcUrlToMatch("data:image/png;base64,", "data:image/png;base64,AAAA")).toBe("data:image/png;base64,AAAA");
+  });
+
+  test("keeps the update's own URL when nothing better is remembered", () => {
+    expect(srcUrlToMatch("data:image/png;base64,", undefined)).toBe("data:image/png;base64,");
+    expect(srcUrlToMatch("https://cdn.example/a.png", undefined)).toBe("https://cdn.example/a.png");
+    // An equal-length remembered URL is the payload-free repeat, not the image.
+    expect(srcUrlToMatch("data:image/png;base64,", "data:image/png;base64,")).toBe("data:image/png;base64,");
+    // A remembered URL that does not extend the stored one is a different image.
+    expect(srcUrlToMatch("data:image/png;base64,", "data:image/jpeg;base64,AAAA")).toBe("data:image/png;base64,");
+  });
+});
+
 describe("rememberDataUrl", () => {
   const dataUrl = (chars: number): string => `data:image/png;base64,${"A".repeat(chars - "data:image/png;base64,".length)}`;
 
@@ -399,6 +418,27 @@ describe("isStaleUpdate", () => {
 
   test("with no active check a terminal update is accepted (failure before any checking)", () => {
     expect(isStaleUpdate(undefined, update("failed", "a"))).toBe(false);
+  });
+});
+
+describe("isStaleUpdate with a requested check", () => {
+  const update = (status: "checking" | "done" | "failed", checkId: string) =>
+    ({ type: "checkUpdate", checkId, srcUrl: "u", status }) as unknown as CheckUpdate;
+
+  test("the running check's result is not stale while another check's popup is open", () => {
+    expect(isStaleUpdate("b", update("done", "b"), "a")).toBe(false);
+  });
+
+  test("the requested check's completion is not stale while a newer check runs", () => {
+    expect(isStaleUpdate("b", update("done", "a"), "a")).toBe(false);
+  });
+
+  test("the requested check's completion is accepted in a dismissed frame", () => {
+    expect(isStaleUpdate(DISMISS_ID, update("done", "a"), "a")).toBe(false);
+  });
+
+  test("a check that is neither running nor opened is stale", () => {
+    expect(isStaleUpdate("b", update("done", "c"), "a")).toBe(true);
   });
 });
 

@@ -64,10 +64,25 @@ export function findSourceByPrefix(prefix: string, root: ParentNode = document):
  * worker's hash check rejects it rather than uploading the wrong image.
  */
 export function dataUrlToRead(stored: string, knownSource: string | undefined, root: ParentNode = document): string | undefined {
+  return rememberedDataUrl(stored, knownSource) ?? findSourceByPrefix(stored, root);
+}
+
+/** The remembered URL, only when it actually carries a payload. */
+function rememberedDataUrl(stored: string, knownSource: string | undefined): string | undefined {
   if (knownSource !== undefined && knownSource.length > stored.length && knownSource.startsWith(stored)) {
     return knownSource;
   }
-  return findSourceByPrefix(stored, root);
+  return undefined;
+}
+
+/**
+ * The URL to match the page's images against. The worker's own OpenAI done
+ * update repeats a data: srcUrl without its payload (PLAN §3), and no <img>
+ * carries that form, so the badge would never find the image; the full URL the
+ * check saw is used instead.
+ */
+export function srcUrlToMatch(stored: string, knownSource: string | undefined): string {
+  return rememberedDataUrl(stored, knownSource) ?? stored;
 }
 
 export const MAX_REMEMBERED_DATA_URLS = 16;

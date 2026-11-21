@@ -20,8 +20,9 @@ export default {
   // Only unit-tested pure logic is mutated. The exclusions are surfaces that
   // CLAUDE.md and PLAN.md §8 cover by manual testing in Brave instead of unit
   // tests: the chrome wiring in background/index.ts, confirm/confirm.ts and
-  // options/options.ts, the DOM shell in content/index.ts, the blob reader (no
-  // unit test), and the i18n wrapper and size-limit constants.
+  // options/options.ts, the DOM shell in content/index.ts and its popup/toast
+  // rendering in content/popup.ts, the blob reader (no unit test), and the i18n
+  // wrapper and size-limit constants.
   //
   // Excluded by file, not by directory: confirm/view.ts and options/state.ts are
   // pure and unit-tested, so they stay in scope. A page's directory says nothing
@@ -31,6 +32,7 @@ export default {
     "src/**/*.ts",
     "!src/background/index.ts",
     "!src/content/index.ts",
+    "!src/content/popup.ts",
     "!src/content/readBlob.ts",
     "!src/confirm/confirm.ts",
     "!src/options/options.ts",
